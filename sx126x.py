@@ -80,6 +80,21 @@ class sx126x:
     def __init__(self,serial_num,freq,addr,power,rssi,air_speed=2400,\
                  net_id=0,buffer_size = 240,crypt=0,\
                  relay=False,lbt=False,wor=False, timeout:float|None=None):
+        """
+        Params:
+            serial_num (string): Serial port number (use "/dev/ttyS0" for RPi w. debian)
+            freq (int): Frequency to use for transmission, 433 and 868 MHz are usable in the EU 
+            addr (int): 2 byte address to use for device, incoming messages will be received with this address, and outgoing messages will include this address.    
+            power (int): transmission power in decibel, choose from these values [10, 13, 17, 22]    
+            rssi (bool): Include signal noise information
+            air_speed (int): air speed of transmissions, should be identical between sender and receiver
+            net_id (int): network id, MUST BE IDENTICAL BETWEEN SENDER AND RECEIVER
+            buffer_size (int): size of individual packets
+            crypt (int): cryptographic key to be used for encrypting messages.
+            lbt (bool): Enable or disable listen before talk (LBT)
+            work (bool): Enable or disable Wake on Radio
+
+        """
         self.rssi = rssi
         self.addr = addr
         self.freq = freq
