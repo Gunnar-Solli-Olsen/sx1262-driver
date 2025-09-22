@@ -7,26 +7,35 @@ class LoRa:
     # Default values for LoRa    
     # SERIAL PORT IS RPi SPECIFIC
     #
-    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/ttyS0", timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
+    
+    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/ttyS0", power=22, uart_baudrate=9600, air_speed=2400, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
         self.freq = FREQ
         self.channel = CHANNEL
         self.serial_port = SERIAL_PORT
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, timeout=timeout) 
         self.timeout = timeout
         self.info = info
         self.debug = debug
         self.warning = warning
+        self.power = power
+        self.uart_baudrate = uart_baudrate
+        self.air_speed = air_speed
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=False, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=timeout) 
+        self.SX126X_UART_BAUDRATE = self.lora_node.SX126X_UART_BAUDRATE
 
-    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,air_speed=2400,relay=False,timeout:float|None=None):
-        return sx126x.sx126x(serial_num,freq, addr, power, rssi, air_speed, relay, timeout=timeout)
+    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,uart_baudrate=9600, air_speed=2400,relay=False,timeout:float|None=None):
+        return sx126x.sx126x(serial_num,freq, addr, power, rssi, uart_baudrate, air_speed, relay, timeout=timeout)
     
-    def change_settings(self, FREQ = None, CHANNEL = None, SERIAL_PORT=None, timeout:float|None=None):
-
+    def change_settings(self, FREQ = None, CHANNEL = None, SERIAL_PORT=None, power:int|None=None, uart_baudrate=None, air_speed:int|None=None, timeout:float|None=None):
+        # if new value, set value to new value 
         if FREQ: self.freq = FREQ
         if CHANNEL: self.channel = CHANNEL
         if SERIAL_PORT: self.serial_port = SERIAL_PORT
+        if power: self.power = power 
+        if uart_baudrate: self.uart_baudrate = uart_baudrate
+        if air_speed: self.air_speed = air_speed
         if timeout: self.timeout = timeout
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, timeout=self.timeout) 
+
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=self.timeout) 
 
     def checksum(self, data:bytes|bytearray):
         """

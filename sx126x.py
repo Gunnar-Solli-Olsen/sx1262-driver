@@ -34,15 +34,16 @@ class sx126x:
     # power = 22
     # air_speed =2400
 
-    SX126X_UART_BAUDRATE_1200 = 0x00
-    SX126X_UART_BAUDRATE_2400 = 0x20
-    SX126X_UART_BAUDRATE_4800 = 0x40
-    SX126X_UART_BAUDRATE_9600 = 0x60
-    SX126X_UART_BAUDRATE_19200 = 0x80
-    SX126X_UART_BAUDRATE_38400 = 0xA0
-    SX126X_UART_BAUDRATE_57600 = 0xC0
-    SX126X_UART_BAUDRATE_115200 = 0xE0
-
+    SX126X_UART_BAUDRATE = {
+        1200 : 0x00,
+        2400 : 0x20,
+        4800 : 0x40,
+        9600 : 0x60,
+        19200 : 0x80,
+        38400 : 0xA0,
+        57600 : 0xC0,
+        115200 : 0xE0
+   }
     SX126X_PACKAGE_SIZE_240_BYTE = 0x00
     SX126X_PACKAGE_SIZE_128_BYTE = 0x40
     SX126X_PACKAGE_SIZE_64_BYTE = 0x80
@@ -54,6 +55,7 @@ class sx126x:
     SX126X_Power_10dBm = 0x03
 
     lora_air_speed_dic = {
+        300:0x00, # i swear to god 0x00 == None for some god forsaken reason
         1200:0x01,
         2400:0x02,
         4800:0x03,
@@ -77,7 +79,7 @@ class sx126x:
         32:SX126X_PACKAGE_SIZE_32_BYTE
     }
 
-    def __init__(self,serial_num,freq,addr,power,rssi,air_speed=2400,\
+    def __init__(self,serial_num,freq,addr,power,rssi,uart_baudrate=9600,air_speed=2400,\
                  net_id=0,buffer_size = 240,crypt=0,\
                  relay=False,lbt=False,wor=False, timeout:float|None=None):
         """
@@ -92,7 +94,7 @@ class sx126x:
             buffer_size (int): size of individual packets
             crypt (int): cryptographic key to be used for encrypting messages.
             lbt (bool): Enable or disable listen before talk (LBT)
-            work (bool): Enable or disable Wake on Radio
+            wor (bool): Enable or disable Wake on Radio
 
         """
         self.rssi = rssi
@@ -111,9 +113,9 @@ class sx126x:
         # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0
         self.ser = serial.Serial(serial_num,9600, timeout=timeout)
         self.ser.flushInput()
-        self.set(freq,addr,power,rssi,air_speed,net_id,buffer_size,crypt,relay,lbt,wor)
+        self.set(freq,addr,power,rssi,uart_baudrate,air_speed,net_id,buffer_size,crypt,relay,lbt,wor)
 
-    def set(self,freq,addr,power,rssi,air_speed=2400,\
+    def set(self,freq,addr,power,rssi,uart_baudrate=9600,air_speed=2400,\
             net_id=0,buffer_size = 240,crypt=0,\
             relay=False,lbt=False,wor=False):
         self.send_to = addr
@@ -136,7 +138,8 @@ class sx126x:
             self.offset_freq = freq_temp
         
         air_speed_temp = self.lora_air_speed_dic.get(air_speed,None)
-        # if air_speed_temp != None
+        # if not air_speed_temp is None:
+        #     raise Exception("stop right there criminal scum, set airspeed to a value or serve your sentence, we couldn't find a value corresponding to", air_speed)
         
         buffer_size_temp = self.lora_buffer_size_dic.get(buffer_size,None)
         # if air_speed_temp != None:
@@ -159,7 +162,7 @@ class sx126x:
             self.cfg_reg[3] = high_addr
             self.cfg_reg[4] = low_addr
             self.cfg_reg[5] = net_id_temp
-            self.cfg_reg[6] = self.SX126X_UART_BAUDRATE_9600 + air_speed_temp
+            self.cfg_reg[6] = self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp
             # 
             # it will enable to read noise rssi value when add 0x20 as follow
             # 
@@ -176,7 +179,7 @@ class sx126x:
             self.cfg_reg[3] = 0x01
             self.cfg_reg[4] = 0x02
             self.cfg_reg[5] = 0x03
-            self.cfg_reg[6] = self.SX126X_UART_BAUDRATE_9600 + air_speed_temp
+            self.cfg_reg[6] = self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp
             # 
             # it will enable to read noise rssi value when add 0x20 as follow
             # 
