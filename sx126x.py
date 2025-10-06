@@ -9,14 +9,14 @@ class sx126x:
     M0 = 22
     M1 = 27
     # if the header is 0xC0, then the LoRa register settings dont lost when it poweroff, and 0xC2 will be lost. 
-    # cfg_reg = [0xC0,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x17,0x43,0x00,0x00]
-    cfg_reg = [0xC2,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x12,0x43,0x00,0x00]
+    cfg_reg = [0xC0,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x17,0x43,0x00,0x00]
+    # cfg_reg = [0xC2,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x12,0x43,0x00,0x00]
     get_reg = bytes(12)
     rssi = False
     addr = 65535
     serial_n = ""
     addr_temp = 0
-
+    prev_baud_rate = None
     #
     # start frequence of two lora module
     #
@@ -32,7 +32,7 @@ class sx126x:
     offset_freq = 18
 
     # power = 22
-    # air_speed =2400
+    # air_speed = 2400
 
     SX126X_UART_BAUDRATE = {
         1200 : 0x00,
@@ -44,6 +44,17 @@ class sx126x:
         57600 : 0xC0,
         115200 : 0xE0
    }
+
+    lora_air_speed_dic = {
+        300:0x00, 
+        1200:0x01,
+        2400:0x02,
+        4800:0x03,
+        9600:0x04,
+        19200:0x05,
+        38400:0x06,
+        62500:0x07
+    }
     SX126X_PACKAGE_SIZE_240_BYTE = 0x00
     SX126X_PACKAGE_SIZE_128_BYTE = 0x40
     SX126X_PACKAGE_SIZE_64_BYTE = 0x80
@@ -53,17 +64,6 @@ class sx126x:
     SX126X_Power_17dBm = 0x01
     SX126X_Power_13dBm = 0x02
     SX126X_Power_10dBm = 0x03
-
-    lora_air_speed_dic = {
-        300:0x00, # i swear to god 0x00 == None for some god forsaken reason
-        1200:0x01,
-        2400:0x02,
-        4800:0x03,
-        9600:0x04,
-        19200:0x05,
-        38400:0x06,
-        62500:0x07
-    }
 
     lora_power_dic = {
         22:0x00,
@@ -79,16 +79,17 @@ class sx126x:
         32:SX126X_PACKAGE_SIZE_32_BYTE
     }
 
-    def __init__(self,serial_num,freq,addr,power,rssi,uart_baudrate=9600,air_speed=2400,\
+    def __init__(self,serial_num,freq,addr,power,rssi,prev_baud_rate:int|None=None, uart_baudrate=9600,air_speed=2400,\
                  net_id=0,buffer_size = 240,crypt=0,\
                  relay=False,lbt=False,wor=False, timeout:float|None=None):
         """
         Params:
-            serial_num (string): Serial port number (use "/dev/ttyS0" for RPi w. debian)
+            serial_num (string): Serial port number (default "/dev/ttyS0" for RPi w. debian)
             freq (int): Frequency to use for transmission, 433 and 868 MHz are usable in the EU 
             addr (int): 2 byte address to use for device, incoming messages will be received with this address, and outgoing messages will include this address.    
             power (int): transmission power in decibel, choose from these values [10, 13, 17, 22]    
             rssi (bool): Include signal noise information
+            uart_baudrate (int): uart baud rate, starts at 9600 as default
             air_speed (int): air speed of transmissions, should be identical between sender and receiver
             net_id (int): network id, MUST BE IDENTICAL BETWEEN SENDER AND RECEIVER
             buffer_size (int): size of individual packets
@@ -110,15 +111,28 @@ class sx126x:
         GPIO.output(self.M0,GPIO.LOW)
         GPIO.output(self.M1,GPIO.HIGH)
 
-        # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0
-        self.ser = serial.Serial(serial_num,9600, timeout=timeout)
+        self.prev_baud_rate = prev_baud_rate
+        if self.prev_baud_rate is None:
+                
+            # old_baud = int(input("enter previous baud rate (default 9600)"))
+            self.prev_baud_rate = 9600 #old_baud
+
+        # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0 (or you can map it to another one manually lol)
+        # print("Starting serial with old baud rate")
+        self.ser = serial.Serial(serial_num,self.prev_baud_rate, timeout=timeout)
         self.ser.flushInput()
+        self.get_settings()
         self.set(freq,addr,power,rssi,uart_baudrate,air_speed,net_id,buffer_size,crypt,relay,lbt,wor)
+        # print("Closing serial with old baud rate")
+        self.ser.close()
+        # input("Press enter to start new baud rate")
+        # print("Starting serial with new baud rate")
+        self.ser = serial.Serial(serial_num,uart_baudrate, timeout=timeout)
+        self.ser.flushInput()
 
     def set(self,freq,addr,power,rssi,uart_baudrate=9600,air_speed=2400,\
             net_id=0,buffer_size = 240,crypt=0,\
             relay=False,lbt=False,wor=False):
-        self.send_to = addr
         self.addr = addr
         # We should pull up the M1 pin when sets the module
         GPIO.output(self.M0,GPIO.LOW)
@@ -163,6 +177,7 @@ class sx126x:
             self.cfg_reg[4] = low_addr
             self.cfg_reg[5] = net_id_temp
             self.cfg_reg[6] = self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp
+            print((self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp).to_bytes(1))
             # 
             # it will enable to read noise rssi value when add 0x20 as follow
             # 
@@ -197,7 +212,7 @@ class sx126x:
         for i in range(2):
             self.ser.write(bytes(self.cfg_reg)) # write config to registers
             r_buff = 0
-            time.sleep(0.2)
+            time.sleep(1)
             if self.ser.inWaiting() > 0:
                 time.sleep(0.1)
                 r_buff = self.ser.read(self.ser.inWaiting()) # Read answer from buffer
@@ -232,27 +247,32 @@ class sx126x:
 
     def get_settings(self):
         # the pin M1 of lora HAT must be high when enter setting mode and get parameters
+        #print(self.ser.baudrate)
         GPIO.output(self.M1,GPIO.HIGH)
         time.sleep(0.1)
         
         # send command to get setting parameters
+        self.ser.flush()
+        time.sleep(0.1)
         self.ser.write(bytes([0xC1,0x00,0x09]))
-        if self.ser.inWaiting() > 0:
-            time.sleep(0.1)
+        time.sleep(0.5)
+        if self.ser.inWaiting() > 9:
+            time.sleep(0.5)
             self.get_reg = self.ser.read(self.ser.inWaiting())
-        
         # check the return characters from hat and print the setting parameters
         if self.get_reg[0] == 0xC1 and self.get_reg[2] == 0x09:
+            print(self.get_reg)
             fre_temp = self.get_reg[8]
             addr_temp = self.get_reg[3] + self.get_reg[4]
             air_speed_temp = self.get_reg[6] & 0x03
             power_temp = self.get_reg[7] & 0x03
             
-            print("Frequence is {0}.125MHz.",fre_temp)
-            print("Node address is {0}.",addr_temp)
-            print("Air speed is {0} bps"+ lora_air_speed_dic.get(None,air_speed_temp))
-            print("Power is {0} dBm" + lora_power_dic.get(None,power_temp))
+            # print(f"Frequence is {fre_temp}.125MHz.")
+            # print(f"Node address is {addr_temp}.")
+            # print("Air speed is {0} bps"+ self.lora_air_speed_dic.get(None,air_speed_temp))
+            # print("Power is {0} dBm" + self.lora_power_dic.get(None,power_temp))
             GPIO.output(self.M1,GPIO.LOW)
+            time.sleep(0.5)
 
     def send(self,data:bytes|bytearray):
         """

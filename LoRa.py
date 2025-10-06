@@ -8,7 +8,7 @@ class LoRa:
     # SERIAL PORT IS RPi SPECIFIC
     #
     
-    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/ttyS0", power=22, uart_baudrate=9600, air_speed=2400, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
+    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/serial0", power=22, uart_baudrate=9600, air_speed=2400, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
         self.freq = FREQ
         self.channel = CHANNEL
         self.serial_port = SERIAL_PORT
@@ -22,20 +22,27 @@ class LoRa:
         self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=False, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=timeout) 
         self.SX126X_UART_BAUDRATE = self.lora_node.SX126X_UART_BAUDRATE
 
-    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,uart_baudrate=9600, air_speed=2400,relay=False,timeout:float|None=None):
-        return sx126x.sx126x(serial_num,freq, addr, power, rssi, uart_baudrate, air_speed, relay, timeout=timeout)
+    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,prev_uart_baudrate=None, uart_baudrate=9600, air_speed=2400,relay=False,timeout:float|None=None):
+        return sx126x.sx126x(serial_num,freq, addr, power, rssi, prev_uart_baudrate, uart_baudrate, air_speed, relay, timeout=timeout)
     
     def change_settings(self, FREQ = None, CHANNEL = None, SERIAL_PORT=None, power:int|None=None, uart_baudrate=None, air_speed:int|None=None, timeout:float|None=None):
         # if new value, set value to new value 
+        print("changing settings...")
         if FREQ: self.freq = FREQ
         if CHANNEL: self.channel = CHANNEL
         if SERIAL_PORT: self.serial_port = SERIAL_PORT
-        if power: self.power = power 
-        if uart_baudrate: self.uart_baudrate = uart_baudrate
+        if power: self.power = power
+        old_baud_rate = None 
+        if uart_baudrate: 
+            self.uart_baudrate = uart_baudrate
+            old_baud_rate = self.lora_node.ser.baudrate
+            if self.debug: print("DEBUG: previous baudrate:", old_baud_rate)
         if air_speed: self.air_speed = air_speed
         if timeout: self.timeout = timeout
+        
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, prev_uart_baudrate=old_baud_rate, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=self.timeout) 
 
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=self.timeout) 
+        time.sleep(0.5)
 
     def checksum(self, data:bytes|bytearray):
         """
@@ -96,16 +103,16 @@ class LoRa:
         print("Datalength: ", data_length)
 
         checksum = self.checksum(data)
-        # print("Checksum: ", checksum)
+        if self.debug: print("DEBUG: Checksum, sender:", checksum)
 
         print("Segments: ", len(segmented_data))
                                                       #    In practice this byte will never exceed 255
                                                       #       |vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv|
         encoded_data = self.pack_packet(address, self.channel, bytes(len(segmented_data).to_bytes()) + bytes(checksum))
-        # print("sending metadata :",encoded_data)
+        if self.debug: print("DEBUG: sending metadata :",encoded_data)
         
         self.lora_node.send(encoded_data)
-
+        time.sleep(0.1)
         i = 0
         for d in segmented_data:
             i+=1
@@ -113,6 +120,7 @@ class LoRa:
             encoded_data = self.pack_packet(address, self.channel, bytes(d))
             print("Encoded data length:", len(encoded_data))
             print("included data size:", encoded_data[6])
+            if self.debug: print("DEBUG: sending:", encoded_data)
             self.lora_node.send(encoded_data)
             
         # Check if receiver reached same checksum
@@ -137,6 +145,8 @@ class LoRa:
         ret = self.lora_node.receive()
         if ret:
             sender_address = int.from_bytes(ret[0:2])
+            if self.debug: print("DEBUG: Received packet from sender:", sender_address)
+            if self.debug: print("DEBUG: content:", ret)
             tot_packets = int(ret[4])
             target_checksum = (ret[5::])
             print("Total incoming packets: ", tot_packets)
@@ -150,7 +160,7 @@ class LoRa:
                     if packet:
                         received = True
                         incoming_data += bytearray(packet[4::])
-                    time.sleep(0.1)
+                    # time.sleep(0.1)
 
                 if self.info: print("INFO: Received packet ", i+1, " of ", tot_packets)
             if self.info: print("INFO: Received all packets, verifying checksum")
@@ -158,8 +168,9 @@ class LoRa:
             checksum = self.checksum(incoming_data)
             if checksum == target_checksum:
                 if self.debug: print("DEBUG: successfully verified checksum!")
-                self.lora_node.send(self.pack_packet(sender_address, self.channel, bytes(checksum)))
-                #print(sender_address + bytes([18]) + bytes([255]) + bytes([255]) + bytes([12]) + bytes(checksum))
+                ret_packet = self.pack_packet(sender_address, self.channel, bytes(checksum))
+                self.lora_node.send(ret_packet)
+                if self.debug: print("DEBUG: ", ret_packet)
                 return incoming_data
             else:
                 if self.debug: print("DEBUG: Checksum failure on receive! \ntarget: ", target_checksum, "\nactual: ", checksum)
