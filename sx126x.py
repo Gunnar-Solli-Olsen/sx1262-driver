@@ -103,6 +103,8 @@ class sx126x:
         self.freq = freq
         self.serial_n = serial_num
         self.power = power
+        self.baudrate = uart_baudrate
+        self.timeout = timeout
         # Initial the GPIO for M0 and M1 Pin
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
@@ -111,24 +113,17 @@ class sx126x:
         GPIO.output(self.M0,GPIO.LOW)
         GPIO.output(self.M1,GPIO.HIGH)
 
-        self.prev_baud_rate = prev_baud_rate
-        if self.prev_baud_rate is None:
-                
-            # old_baud = int(input("enter previous baud rate (default 9600)"))
-            self.prev_baud_rate = 9600 #old_baud
+        self.conf_baudrate = 9600 
 
         # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0 (or you can map it to another one manually lol)
-        # print("Starting serial with old baud rate")
-        self.ser = serial.Serial(serial_num,self.prev_baud_rate, timeout=timeout)
+        self.ser = serial.Serial(serial_num,self.conf_baudrate, timeout=self.timeout)
         self.ser.flushInput()
-        self.get_settings()
+
         self.set(freq,addr,power,rssi,uart_baudrate,air_speed,net_id,buffer_size,crypt,relay,lbt,wor)
-        # print("Closing serial with old baud rate")
+
         self.ser.close()
-        # input("Press enter to start new baud rate")
-        # print("Starting serial with new baud rate")
-        self.ser = serial.Serial(serial_num,uart_baudrate, timeout=timeout)
-        self.ser.flushInput()
+        self.ser = serial.Serial(serial_num,uart_baudrate, timeout=self.timeout)
+ 
 
     def set(self,freq,addr,power,rssi,uart_baudrate=9600,air_speed=2400,\
             net_id=0,buffer_size = 240,crypt=0,\
@@ -207,39 +202,44 @@ class sx126x:
             self.cfg_reg[9] = 0x03 + rssi_temp
             self.cfg_reg[10] = h_crypt
             self.cfg_reg[11] = l_crypt
-        self.ser.flushInput() # clear the buffer
 
-        for i in range(2):
-            self.ser.write(bytes(self.cfg_reg)) # write config to registers
-            r_buff = 0
+
+        for i in range(3):
+            written = self.ser.write(bytes(self.cfg_reg)) # write config to registers
+            while self.ser.out_waiting > 0:
+                time.sleep(0.01)
+            print("Written: ", written, "of", len(self.cfg_reg))
             time.sleep(1)
             if self.ser.inWaiting() > 0:
-                time.sleep(0.1)
+                time.sleep(0.5)
                 r_buff = self.ser.read(self.ser.inWaiting()) # Read answer from buffer
                 if r_buff[0] == 0xC1:
                     pass
-                    # print("parameters setting is :",end='')
-                    # for i in self.cfg_reg:
-                        # print(hex(i),end=' ')
-                        
-                    # print('\r\n')
-                    # print("parameters return is  :",end='')
-                    # for i in r_buff:
-                        # print(hex(i),end=' ')
-                    # print('\r\n')
-                else: # this is reached
-                    pass
-                    #print("parameters setting fail :",r_buff)
+                else:
+                    print("FUUUUCK")
+                    print(r_buff)
                 break
             else:
-                print("setting fail,setting again") 
-                self.ser.flushInput()
-                time.sleep(0.2)
-                print('\x1b[1A',end='\r')
-                if i == 1:
-                    print("setting fail,Press Esc to Exit and run again")
-                    # time.sleep(2)
-                    # print('\x1b[1A',end='\r')     
+                print("SHIIIT")
+
+        self.ser.write(bytes([0xC1,0x00,0x09]))
+
+        timeout = 5
+        starttime = time.time()
+        deltatime = 0
+
+        while self.ser.in_waiting < 1:
+            print( f'\r{self.ser.in_waiting}', end="", flush=True)
+            deltatime = time.time() - starttime
+            time.sleep(0.01)
+            if deltatime > timeout:
+                print("\nWARNING: TIMED OUT", end="")
+                break
+            print()
+            print(f"waited {deltatime} seconds to change settings")
+
+        self.ser.reset_input_buffer() # clear the input buffer
+        self.ser.reset_output_buffer() # clear the output buffer
 
         GPIO.output(self.M0,GPIO.LOW)
         GPIO.output(self.M1,GPIO.LOW)
@@ -250,9 +250,10 @@ class sx126x:
         #print(self.ser.baudrate)
         GPIO.output(self.M1,GPIO.HIGH)
         time.sleep(0.1)
-        
+        self.ser.close()
+        self.ser = serial.Serial(self.serial_n,self.conf_baudrate, timeout=self.timeout)
         # send command to get setting parameters
-        self.ser.flush()
+        self.ser.flushInput()
         time.sleep(0.1)
         self.ser.write(bytes([0xC1,0x00,0x09]))
         time.sleep(0.5)
@@ -273,6 +274,9 @@ class sx126x:
             # print("Power is {0} dBm" + self.lora_power_dic.get(None,power_temp))
             GPIO.output(self.M1,GPIO.LOW)
             time.sleep(0.5)
+        self.ser.close()
+        self.ser = serial.Serial(self.serial_n,self.baudrate, timeout=self.timeout)
+
 
     def send(self,data:bytes|bytearray):
         """
@@ -282,10 +286,14 @@ class sx126x:
         GPIO.output(self.M1,GPIO.LOW)
         GPIO.output(self.M0,GPIO.LOW)
         time.sleep(0.1)
-
+        
+        while self.ser.out_waiting > 0:
+            time.sleep(0.01)
+        
         self.ser.write(data)
         if self.rssi == True:
             self.get_channel_rssi()
+
         while self.ser.out_waiting > 0:
             time.sleep(0.01)
         

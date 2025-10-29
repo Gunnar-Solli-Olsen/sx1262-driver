@@ -42,8 +42,6 @@ class LoRa:
         
         self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, prev_uart_baudrate=old_baud_rate, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=self.timeout) 
 
-        time.sleep(0.5)
-
     def checksum(self, data:bytes|bytearray):
         """
         Generate checksum from data using sha-256
@@ -185,7 +183,7 @@ class LoRa:
             print("WARNING: data does not fit in a single LoRa message")
 
         packet = self.pack_packet(address, self.channel, bytes(len(data).to_bytes()) + bytes(data))
-        if self.debug: print("Packet: ", packet)
+        if self.debug: print("DEBUG: Packet: ", packet)
         self.lora_node.send(packet)
 
     def raw_recv(self):
