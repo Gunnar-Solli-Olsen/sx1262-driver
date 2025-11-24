@@ -89,7 +89,7 @@ class sx126x:
             addr (int): 2 byte address to use for device, incoming messages will be received with this address, and outgoing messages will include this address.    
             power (int): transmission power in decibel, choose from these values [10, 13, 17, 22]    
             rssi (bool): Include signal noise information
-            uart_baudrate (int): uart baud rate, starts at 9600 as default
+            uart_baudrate (int): uart baud rate for transmissions, starts at 9600 as default. Note that this rate only applies to communication, not for configuration
             air_speed (int): air speed of transmissions, should be identical between sender and receiver
             net_id (int): network id, MUST BE IDENTICAL BETWEEN SENDER AND RECEIVER
             buffer_size (int): size of individual packets
@@ -209,19 +209,24 @@ class sx126x:
             while self.ser.out_waiting > 0:
                 time.sleep(0.01)
             print("Written: ", written, "of", len(self.cfg_reg))
-            time.sleep(1)
+
+            # Wait longer during retries, this lowers the configuration time for higher baud-rates
+            time.sleep(1+i*2) # wait for 1, 3, 5 seconds when applying settings
+
             if self.ser.inWaiting() > 0:
                 time.sleep(0.5)
                 r_buff = self.ser.read(self.ser.inWaiting()) # Read answer from buffer
                 if r_buff[0] == 0xC1:
                     pass
                 else:
-                    print("FUUUUCK")
-                    print(r_buff)
+                    print(f"Unexpected response encountered during lora configuration:{r_buff}")
                 break
             else:
-                print("SHIIIT")
+                print("Missing response during lora configuration, trying again")
+                pass
+        
 
+        # TODO: Consider removing this section, it fetches settings without doing anything with the settings
         self.ser.write(bytes([0xC1,0x00,0x09]))
 
         timeout = 5
@@ -297,7 +302,7 @@ class sx126x:
         while self.ser.out_waiting > 0:
             time.sleep(0.01)
         
-    def receive(self, timeout=-1):
+    def receive(self):
         """
         ### Non-blocking receive
 
@@ -309,12 +314,11 @@ class sx126x:
             # read first 4 bytes 
             
             r_buff = self.ser.read(4)
-            # 4th byte contains total amount of bytes in packet
+            # 4th byte contains tot. number of bytes in packet
             packet_size = r_buff[3]
-
-            while True:
-                r_buff += self.ser.read()
-                if len(r_buff) == packet_size-3: # Why does this work
+            while True: 
+                r_buff += self.ser.read() 
+                if len(r_buff) == packet_size-3: 
                     break
 
             msg = r_buff
