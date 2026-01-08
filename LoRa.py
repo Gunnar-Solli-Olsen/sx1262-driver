@@ -8,7 +8,7 @@ class LoRa:
     # SERIAL PORT IS RPi SPECIFIC
     #
     
-    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/serial0", power=22, uart_baudrate=9600, air_speed=2400, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
+    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/serial0", power=22, rssi=False, uart_baudrate=9600, air_speed=2400, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
         self.freq = FREQ
         self.channel = CHANNEL
         self.serial_port = SERIAL_PORT
@@ -19,7 +19,7 @@ class LoRa:
         self.power = power
         self.uart_baudrate = uart_baudrate
         self.air_speed = air_speed
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=False, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=timeout) 
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=rssi, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=timeout) 
         self.SX126X_UART_BAUDRATE = self.lora_node.SX126X_UART_BAUDRATE
 
     def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,prev_uart_baudrate=None, uart_baudrate=9600, air_speed=2400,relay=False,timeout:float|None=None):
@@ -191,6 +191,7 @@ class LoRa:
         if ret:
             if self.debug: print("DEBUG: Reading incoming packet")
             return ret
+        
             # incoming_data = bytes()
             # received = False
             # packet = None

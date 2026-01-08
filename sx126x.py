@@ -307,8 +307,10 @@ class sx126x:
         ### Non-blocking receive
 
         ### Returns 
-        None: object when no packet inbound.\n
+        None: object when no packet inbound.\n        
         bytes: object when packet inbound.\n
+        
+        tuple (bytes, rssi) if rssi is enabled
         """
         if self.ser.inWaiting() > 4:
             # read first 4 bytes 
@@ -316,30 +318,42 @@ class sx126x:
             r_buff = self.ser.read(4)
             # 4th byte contains tot. number of bytes in packet
             packet_size = r_buff[3]
+            # ! THIS SECTION LOOPS INDEFINETLY IF PACKET SIZE HEADER IS CORRUPTED
+            # TODO: ADD DETECTION OF THIS ERROR, BROKEN PACKETS SHOULD BE DROPPED (like udp)
+            # TODO: doing this is made difficult due to the current timeout fault detection
             while True: 
                 r_buff += self.ser.read() 
                 if len(r_buff) == packet_size-3: 
+                    self.ser.inWaiting() 
                     break
 
             msg = r_buff
             
             # print the rssi
             if self.rssi:
-                # print('\x1b[3A',end='\r')
-                print("the packet rssi value: -{0}dBm".format(256-r_buff[-1:][0]))
-                self.get_channel_rssi()
-            else:
-                pass
-                #print('\x1b[2A',end='\r')
 
-            return msg
+                # ! THIS CODE IS A GUESS AT BEST, DO NOT TRUST IT
+                r_buff += self.ser.read()  
+                # ! THIS CODE IS A GUESS AT BEST, DO NOT TRUST IT
+
+                # TODO: Check if rssi still works
+                print("the packet rssi value: -{0}dBm".format(256-r_buff[-1:][0]))
+                # self.get_channel_rssi()
+                return (msg, (256-r_buff[-1:][0]))
+            else:
+                return msg
 
     def get_channel_rssi(self):
+        """
+        Give RSSI signal noise readout
+
+        TODO: make function work for other uart baudrates than 9600 (Switch to 9600, then reverse to previous rate)
+        """
         GPIO.output(self.M1,GPIO.LOW)
         GPIO.output(self.M0,GPIO.LOW)
         time.sleep(0.1)
         self.ser.flushInput()
-        self.ser.write(bytes([0xC0,0xC1,0xC2,0xC3,0x00,0x02]))
+        self.ser.write(bytes([0xC0,0xC1,0xC2,0xC3,0x00,0x02])) # magic bytes
         time.sleep(0.5)
         re_temp = bytes(5)
         if self.ser.inWaiting() > 0:
