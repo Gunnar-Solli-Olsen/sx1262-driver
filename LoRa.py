@@ -218,3 +218,15 @@ class LoRa:
         This enables sending and receiving transmissions
         """
         self.lora_node.wake()
+    
+    def get_sender(bytestring:bytes): 
+        """
+        Fetch sender from bytestring
+        """
+        # packet_string = str(bytestring)
+        
+        # print(f"message:{packet_string}")
+        # print(f"header :{bytestring[:5]}")
+        # print(f"sender :{int(bytestring[:2].hex(), base=16)}")
+        # print(f"length :{int(bytestring[4:5].hex(), base=16)}")
+        return int(bytestring[:2].hex(), base=16)
