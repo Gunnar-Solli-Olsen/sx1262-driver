@@ -8,6 +8,7 @@ class sx126x:
 
     M0 = 22
     M1 = 27
+    AUX = 4
     # if the header is 0xC0, then the LoRa register settings dont lost when it poweroff, and 0xC2 will be lost. 
     cfg_reg = [0xC0,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x17,0x43,0x00,0x00]
     # cfg_reg = [0xC2,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x12,0x43,0x00,0x00]
@@ -112,6 +113,7 @@ class sx126x:
         GPIO.setup(self.M1,GPIO.OUT)
         GPIO.output(self.M0,GPIO.LOW)
         GPIO.output(self.M1,GPIO.HIGH)
+        GPIO.setup(self.AUX,GPIO.IN) # ! THIS ONE IS VERY IMPORTANT, IT SAYS WHEN THE BUFFER FOR TRANSMITTING DATA IS EMPTY (READY TO SEND MORE) 
 
         self.conf_baudrate = 9600 
 
@@ -287,24 +289,28 @@ class sx126x:
         """
         the data format like as following "node address,frequence,payload" "20,868,Hello World\"
         """
-        # Do we need this? 
-        GPIO.output(self.M1,GPIO.LOW)
-        GPIO.output(self.M0,GPIO.LOW)
-        time.sleep(0.1)
+        # print(f"AUX pre : {GPIO.input(self.AUX)}")
         
-        while self.ser.out_waiting > 0:
-            time.sleep(0.01)
+        while self.ser.out_waiting > 0 or GPIO.input(self.AUX) == 0:
+            time.sleep(0.001)
         
+        # print(f"AUX post: {GPIO.input(self.AUX)}")
+
         self.ser.write(data)
+        
+
+        # TODO: (long term) Store time of previous send, then check that more than 0.0002 sec. has passed before next send
+        time.sleep(0.00020) # This ensures that the sx-1262 has started transferring before the function returns 
+
+        while self.ser.out_waiting > 0 or GPIO.input(self.AUX) == 0:
+            time.sleep(0.001)
+
         if self.rssi == True:
             self.get_channel_rssi()
-
-        while self.ser.out_waiting > 0:
-            time.sleep(0.01)
         
     def receive(self):
         """
-        ### Non-blocking receive
+        ### blocking receive
 
         ### Returns 
         None: object when no packet inbound.\n        
@@ -319,12 +325,11 @@ class sx126x:
             # 4th byte contains tot. number of bytes in packet
             packet_size = r_buff[3]
             # ! THIS SECTION LOOPS INDEFINETLY IF PACKET SIZE HEADER IS CORRUPTED
-            # TODO: ADD DETECTION OF THIS ERROR, BROKEN PACKETS SHOULD BE DROPPED (like udp)
-            # TODO: doing this is made difficult due to the current timeout fault detection
+            # TODO: ADD DETECTION OF BROKEN PACKETS, THEY SHOULD BE DROPPED (like udp)
             while True: 
                 r_buff += self.ser.read() 
                 if len(r_buff) == packet_size-3: 
-                    self.ser.inWaiting() 
+                    #self.ser.inWaiting()  # This line does nothing? 
                     break
 
             msg = r_buff
@@ -342,7 +347,30 @@ class sx126x:
                 return (msg, (256-r_buff[-1:][0]))
             else:
                 return msg
+            
+    def receive_time(self, listen_time):
+        """
+        ### blocking receive
 
+        ### Returns 
+        None: object when no packet inbound.\n        
+        bytes: object when packet inbound.\n
+        
+        tuple (bytes, rssi) if rssi is enabled
+        """
+        # 
+        if self.ser.inWaiting() > 4: # This could be 1
+            r_buff = ""
+            starttime = time.time()
+            deltatime = time.time()
+            while deltatime - starttime < listen_time: 
+                deltatime = time.time()
+                r_buff += self.ser.read() 
+
+            msg = r_buff
+            print(f"msg: {msg}")
+            return msg
+        
     def get_channel_rssi(self):
         """
         Give RSSI signal noise readout
@@ -351,7 +379,8 @@ class sx126x:
         """
         GPIO.output(self.M1,GPIO.LOW)
         GPIO.output(self.M0,GPIO.LOW)
-        time.sleep(0.1)
+        while GPIO.input(4) == 0:
+            pass
         self.ser.flushInput()
         self.ser.write(bytes([0xC0,0xC1,0xC2,0xC3,0x00,0x02])) # magic bytes
         time.sleep(0.5)
