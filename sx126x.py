@@ -297,10 +297,14 @@ class sx126x:
         # print(f"AUX post: {GPIO.input(self.AUX)}")
 
         self.ser.write(data)
-        
 
-        # TODO: (long term) Store time of previous send, then check that more than 0.0002 sec. has passed before next send
-        time.sleep(0.00020) # This ensures that the sx-1262 has started transferring before the function returns 
+        # THIS SECTION WAITS FOR AUX TO REACT
+        st = time.perf_counter()
+        while GPIO.input(self.AUX) == 1:
+            # time.sleep(0.0001) # Alternative to busy wait
+            pass
+        et = time.perf_counter()
+        # print(f"time until aux reacted: {et - st}")
 
         while self.ser.out_waiting > 0 or GPIO.input(self.AUX) == 0:
             time.sleep(0.001)
