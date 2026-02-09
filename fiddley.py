@@ -2,24 +2,23 @@ import LoRa
 import serial
 import RPi.GPIO as GPIO
 import time
-lora = LoRa.LoRa(debug=True, info=True, SERIAL_PORT="/dev/ttyUSB0") # please work
+import sys
 
-BAUDs = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200] # THESE DON'T APPLY IF YOU TRY CHANGING AWAY FROM 9600
-BAUDs.sort(reverse=True)
-# for baud in BAUDs:
-        
-#     #lora.lora_node.get_settings()
-#     print(f"Changing to {baud}")
-#     lora.change_settings(uart_baudrate=baud)
-lora.change_settings(uart_baudrate=9600)
+if "-s" in sys.argv:
+    lora = LoRa.LoRa(CHANNEL=10000, debug=True, info=True, uart_baudrate=2400, air_speed=1200, SERIAL_PORT="/dev/ttyAMA0", rssi=False, timeout=2.0) 
+    msg_count = 0
 
-while True:
-    lora.raw_send(65535, b'NOISE')
-
-# GPIO.setmode(GPIO.BCM)
-
-# GPIO.setup(22, GPIO.OUT)
-# GPIO.setup(27, GPIO.OUT)
-
-# GPIO.output(22, GPIO.HIGH)
-# GPIO.output(27, GPIO.HIGH)
+    lora.raw_send(20000, b"test")
+     
+else:
+    lora = LoRa.LoRa(CHANNEL=20000, debug=True, info=True, uart_baudrate=2400, air_speed=1200, SERIAL_PORT="/dev/ttyAMA0", rssi=False, timeout=2.0) 
+    msg_count = 0
+    while True:
+        input()
+        packet = lora.raw_recv()
+        # print(lora.lora_node.ser)
+        if packet != None:
+            msg_count+=1
+            print(packet)
+            print(f"msg_count: {msg_count}")
+            
