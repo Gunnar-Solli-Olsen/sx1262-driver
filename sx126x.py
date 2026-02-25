@@ -113,7 +113,8 @@ class sx126x:
         GPIO.setup(self.M1,GPIO.OUT)
         GPIO.output(self.M0,GPIO.LOW)
         GPIO.output(self.M1,GPIO.HIGH)
-        GPIO.setup(self.AUX,GPIO.IN) # ! THIS ONE IS VERY IMPORTANT, IT SAYS WHEN THE BUFFER FOR TRANSMITTING DATA IS EMPTY (READY TO SEND MORE) 
+        # ! AUX PIN IS 1 WHEN E22-900T22S SEND BUFFER IS EMPTY
+        GPIO.setup(self.AUX,GPIO.IN) 
 
         self.conf_baudrate = 9600 
 
@@ -314,13 +315,13 @@ class sx126x:
         
     def receive(self):
         """
-        ### blocking receive
+        ### non-blocking receive
 
         ### Returns 
         None: object when no packet inbound.\n        
         bytes: object when packet inbound.\n
         
-        tuple (bytes, rssi) if rssi is enabled
+        bytes, or tuple (bytes, rssi) when rssi is enabled
         """
         if self.ser.inWaiting() > 4:
             # read first 4 bytes 
@@ -374,7 +375,8 @@ class sx126x:
             msg = r_buff
             print(f"msg: {msg}")
             return msg
-        
+    
+
     def get_channel_rssi(self):
         """
         Give RSSI signal noise readout
