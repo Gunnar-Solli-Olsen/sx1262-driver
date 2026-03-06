@@ -118,7 +118,7 @@ class sx126x:
 
         self.conf_baudrate = 9600 
 
-        # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0 (or you can map it to another one manually lol)
+        # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0 (or you can map it to another one manually if you are a nerd)
         self.ser = serial.Serial(serial_num,self.conf_baudrate, timeout=self.timeout)
         self.ser.flushInput()
 
@@ -206,7 +206,6 @@ class sx126x:
             self.cfg_reg[10] = h_crypt
             self.cfg_reg[11] = l_crypt
 
-
         for i in range(3):
             written = self.ser.write(bytes(self.cfg_reg)) # write config to registers
             while self.ser.out_waiting > 0:
@@ -253,7 +252,7 @@ class sx126x:
         GPIO.output(self.M1,GPIO.LOW)
         time.sleep(0.1)
 
-    def get_settings(self):
+    def get_config(self):
         # the pin M1 of lora HAT must be high when enter setting mode and get parameters
         #print(self.ser.baudrate)
         GPIO.output(self.M1,GPIO.HIGH)
@@ -263,28 +262,38 @@ class sx126x:
         # send command to get setting parameters
         self.ser.flushInput()
         time.sleep(0.1)
+
         self.ser.write(bytes([0xC1,0x00,0x09]))
-        time.sleep(0.5)
-        if self.ser.inWaiting() > 9:
-            time.sleep(0.5)
-            self.get_reg = self.ser.read(self.ser.inWaiting())
+
+        # start_time = time.time()
+        # delta_time = time.time() - start_time
+
+        while self.ser.inWaiting() < 9:
+            # delta_time = time.time() - start_time
+            # print(f"Aux pin: {GPIO.input(self.AUX)}") # This code makes my eyes hurt
+            time.sleep(0.01)
+        # print(delta_time)
+
+        self.get_reg = self.ser.read(self.ser.inWaiting())
+        
+        
         # check the return characters from hat and print the setting parameters
         if self.get_reg[0] == 0xC1 and self.get_reg[2] == 0x09:
-            print(self.get_reg)
-            fre_temp = self.get_reg[8]
-            addr_temp = self.get_reg[3] + self.get_reg[4]
-            air_speed_temp = self.get_reg[6] & 0x03
+            addr_temp = (self.get_reg[3] << 8) + self.get_reg[4] 
+            air_speed_temp = self.get_reg[6] & 0x07
             power_temp = self.get_reg[7] & 0x03
+            fre_temp = self.get_reg[8]
             
-            # print(f"Frequence is {fre_temp}.125MHz.")
-            # print(f"Node address is {addr_temp}.")
-            # print("Air speed is {0} bps"+ self.lora_air_speed_dic.get(None,air_speed_temp))
-            # print("Power is {0} dBm" + self.lora_power_dic.get(None,power_temp))
-            GPIO.output(self.M1,GPIO.LOW)
-            time.sleep(0.5)
+            print(f"Node address is {addr_temp}.")
+            print(f"Air speed is {[key for key in self.lora_air_speed_dic if self.lora_air_speed_dic[key] == air_speed_temp]} bps")
+            print(f"Power is {[key for key in self.lora_power_dic if self.lora_power_dic.get(key) == power_temp]} dBm")
+            print(f"Frequency offset/channel: {850 + fre_temp}.125MHz.")
+            # time.sleep(0.5)
+
         self.ser.close()
         self.ser = serial.Serial(self.serial_n,self.baudrate, timeout=self.timeout)
-
+        GPIO.output(self.M1,GPIO.LOW)
+        return self.get_reg[3::]
 
     def send(self,data:bytes|bytearray):
         """
@@ -323,7 +332,7 @@ class sx126x:
         
         bytes, or tuple (bytes, rssi) when rssi is enabled
         """
-        if self.ser.inWaiting() > 4:
+        if self.ser.inWaiting() > 4: 
             # read first 4 bytes 
             
             r_buff = self.ser.read(4)

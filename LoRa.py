@@ -65,8 +65,8 @@ class LoRa:
 
     
     # 
-    # 
-    # TODO: check that data can actually be both bytes and bytearrays 
+    # TODO: make sure this works
+    # TODO: make it work well
     #
     def send(self, address:int, data:bytearray|bytes):
         """
