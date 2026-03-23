@@ -10,14 +10,15 @@ class sx126x:
     M1 = 27
     AUX = 4
     # if the header is 0xC0, then the LoRa register settings dont lost when it poweroff, and 0xC2 will be lost. 
-    cfg_reg = [0xC0,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x17,0x43,0x00,0x00]
-    # cfg_reg = [0xC2,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x12,0x43,0x00,0x00]
+    cfg_reg = [0xC0,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x16,0x43,0x00,0x00]
+    # cfg_reg = [0xC2,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x16,0x03,0x00,0x00] # What does 43 do? (looks like it is just overwritten)
     get_reg = bytes(12)
     rssi = False
     addr = 65535
     serial_n = ""
     addr_temp = 0
     prev_baud_rate = None
+    point_to_point = True
     #
     # start frequence of two lora module
     #
@@ -32,8 +33,7 @@ class sx126x:
     # 410~493MHz      or    850~930MHz
     offset_freq = 18
 
-    # power = 22
-    # air_speed = 2400
+    SX126X_CONF_UART_BAUDRATE = 9600
 
     SX126X_UART_BAUDRATE = {
         1200 : 0x00,
@@ -45,10 +45,10 @@ class sx126x:
         57600 : 0xC0,
         115200 : 0xE0
    }
-
+    
     lora_air_speed_dic = {
-        300:0x00, 
-        1200:0x01,
+        300:0x00,  #! only available on SX1268-433T22S
+        1200:0x01, #! only available on SX1268-433T22S
         2400:0x02,
         4800:0x03,
         9600:0x04,
@@ -56,11 +56,13 @@ class sx126x:
         38400:0x06,
         62500:0x07
     }
+
     SX126X_PACKAGE_SIZE_240_BYTE = 0x00
     SX126X_PACKAGE_SIZE_128_BYTE = 0x40
     SX126X_PACKAGE_SIZE_64_BYTE = 0x80
     SX126X_PACKAGE_SIZE_32_BYTE = 0xC0
 
+    # what the hell is this, these constants are never used
     SX126X_Power_22dBm = 0x00
     SX126X_Power_17dBm = 0x01
     SX126X_Power_13dBm = 0x02
@@ -85,14 +87,14 @@ class sx126x:
                  relay=False,lbt=False,wor=False, timeout:float|None=None):
         """
         Params:
-            serial_num (string): Serial port number (default "/dev/ttyS0" for RPi w. debian)
+            serial_num (string): Serial port number (default "/dev/ttyAMA0" for RPi w. debian)
             freq (int): Frequency to use for transmission, 433 and 868 MHz are usable in the EU 
-            addr (int): 2 byte address to use for device, incoming messages will be received with this address, and outgoing messages will include this address.    
+            addr (int): 2 byte address to use for device, incoming messages will be received with this address, and outgoing messages will include this address. (this does not apply to repeater mode, the bytes there are used to bridge networks) 
             power (int): transmission power in decibel, choose from these values [10, 13, 17, 22]    
             rssi (bool): Include signal noise information
             uart_baudrate (int): uart baud rate for transmissions, starts at 9600 as default. Note that this rate only applies to communication, not for configuration
             air_speed (int): air speed of transmissions, should be identical between sender and receiver
-            net_id (int): network id, MUST BE IDENTICAL BETWEEN SENDER AND RECEIVER
+            net_id (int): network id, MUST BE IDENTICAL BETWEEN SENDER AND RECEIVER (use repeater mode to bridge between net ids)
             buffer_size (int): size of individual packets
             crypt (int): cryptographic key to be used for encrypting messages.
             lbt (bool): Enable or disable listen before talk (LBT)
@@ -116,10 +118,8 @@ class sx126x:
         # ! AUX PIN IS 1 WHEN E22-900T22S SEND BUFFER IS EMPTY
         GPIO.setup(self.AUX,GPIO.IN) 
 
-        self.conf_baudrate = 9600 
-
         # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0 (or you can map it to another one manually if you are a nerd)
-        self.ser = serial.Serial(serial_num,self.conf_baudrate, timeout=self.timeout)
+        self.ser = serial.Serial(serial_num, self.SX126X_CONF_UART_BAUDRATE, timeout=self.timeout)
         self.ser.flushInput()
 
         self.set(freq,addr,power,rssi,uart_baudrate,air_speed,net_id,buffer_size,crypt,relay,lbt,wor)
@@ -135,23 +135,33 @@ class sx126x:
         # We should pull up the M1 pin when sets the module
         GPIO.output(self.M0,GPIO.LOW)
         GPIO.output(self.M1,GPIO.HIGH)
-        time.sleep(0.1) # This annoys me but it is necessary
+        time.sleep(0.1) # wait for device to turn to configuration mode
+        # TODO: Replace this sleep with smaller sleep and AT command to get current mode of device 
+        # TODO: (see Ebyte documentation for AT commands)
 
         low_addr = addr & 0xff
         high_addr = addr >> 8 & 0xff
         net_id_temp = net_id & 0xff
-        if freq > 850:
+        if freq > 850: 
             freq_temp = freq - 850
             self.start_freq = 850
             self.offset_freq = freq_temp
         elif freq > 410:
+            print("WARNING: This code is untested for the sx1268-433M")
             freq_temp = freq - 410
             self.start_freq  = 410
-            self.offset_freq = freq_temp
-        
+            self.offset_freq = freq_temp 
+            
+        # TODO: Add range checks for the selected frequency
+        # TODO: Change the frequency selection so the developer gets warned when selecting invalid freq.
+        # TODO: Use AT command to get device model, this software is currently known to work with a single device so the first check could be to verify the return being "DEVTYPE=E22-900T22S", and throw exception when missmatches between frequency and used device is detected.
+
+        if air_speed > uart_baudrate:
+            print("WARNING: Air Rate is higher than baudrate, this can lead to receiver side buffer overflows (device receives data faster than it can send it to host)")
+
         air_speed_temp = self.lora_air_speed_dic.get(air_speed,None)
-        # if not air_speed_temp is None:
-        #     raise Exception("stop right there criminal scum, set airspeed to a value or serve your sentence, we couldn't find a value corresponding to", air_speed)
+        if air_speed_temp is None:
+            raise Exception("Air speed not recognized", air_speed)
         
         buffer_size_temp = self.lora_buffer_size_dic.get(buffer_size,None)
         # if air_speed_temp != None:
@@ -159,12 +169,15 @@ class sx126x:
         power_temp = self.lora_power_dic.get(power,None)
         #if power_temp != None:
 
-        if rssi:
-            # enable print rssi value 
-            rssi_temp = 0x80
+        # TODO: Consider splitting the packet rssi value from the noise rssi value 
+        if rssi: 
+            # enable printing rssi values
+            rssi_temp = 0x80  # This appends every message and has some performance impact 
+            rssi_noise = 0x20 # This enables command {0xC0, 0xC1, 0xC2, 0xC3} in transmission and WoR modes to get current ambient noise
         else:
             # disable print rssi value
             rssi_temp = 0x00        
+            rssi_noise = 0x00
 
         # get crypt
         l_crypt = crypt & 0xff
@@ -173,78 +186,81 @@ class sx126x:
         if relay==False:
             self.cfg_reg[3] = high_addr
             self.cfg_reg[4] = low_addr
-            self.cfg_reg[5] = net_id_temp
-            self.cfg_reg[6] = self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp
-            print((self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp).to_bytes(1))
+            self.cfg_reg[5] = net_id_temp 
+            # TODO: CHECK IF AIR RATE IS SUPPORTED BEFORE TRYING TO WRITE IT  (sx1262 868M changes 300 and 1200 to 2400)
+            self.cfg_reg[6] = self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp 
+            # print((self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp).to_bytes(1))
+            self.cfg_reg[7] = buffer_size_temp + power_temp + rssi_noise 
+            self.cfg_reg[8] = freq_temp 
             # 
-            # it will enable to read noise rssi value when add 0x20 as follow
-            # 
-            self.cfg_reg[7] = buffer_size_temp + power_temp + 0x20
-            self.cfg_reg[8] = freq_temp
+            # The HAT will output a packet rssi value following received message
+            # when the eighth bit with 06H register(rssi_temp = 0x80) is enabled
             #
-            # it will output a packet rssi value following received message
-            # when enable eighth bit with 06H register(rssi_temp = 0x80)
-            #
-            self.cfg_reg[9] = 0x43 + rssi_temp
+            self.cfg_reg[9] = 0x03 + rssi_temp 
             self.cfg_reg[10] = h_crypt
             self.cfg_reg[11] = l_crypt
+            print(bytearray(self.cfg_reg))
         else:
-            self.cfg_reg[3] = 0x01
-            self.cfg_reg[4] = 0x02
-            self.cfg_reg[5] = 0x03
-            self.cfg_reg[6] = self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp
-            # 
-            # it will enable to read noise rssi value when add 0x20 as follow
-            # 
-            self.cfg_reg[7] = buffer_size_temp + power_temp + 0x20
-            self.cfg_reg[8] = freq_temp
-            #
-            # it will output a packet rssi value following received message
-            # when enable eighth bit with 06H register(rssi_temp = 0x80)
-            #
-            self.cfg_reg[9] = 0x03 + rssi_temp
-            self.cfg_reg[10] = h_crypt
-            self.cfg_reg[11] = l_crypt
+            raise Exception("Relay mode has not been implemented yet")
+            # TODO: Implement repeater mode
+            #? ADDH and ADDL are used to relay messages between networks (as defined by NETID)
+            #? Relay mode disables receiving and transmitting messages, the node only acts as a relay (this also disables low power mode)
+            #? 
+            # self.cfg_reg[3] = 0x01 # Why is the adress hardcoded for relay mode? 
+            # self.cfg_reg[4] = 0x02
+            # self.cfg_reg[5] = 0x03
+            # self.cfg_reg[6] = self.SX126X_UART_BAUDRATE[uart_baudrate] + air_speed_temp
+            # # 
+            # # it will enable to read noise rssi value when add 0x20 as follow
+            # # 
+            # self.cfg_reg[7] = buffer_size_temp + power_temp + 0x20
+            # self.cfg_reg[8] = freq_temp
+            # #
+            # # it will output a packet rssi value following received message
+            # # when enable eighth bit with 06H register(rssi_temp = 0x80)
+            # #
+            # self.cfg_reg[9] = 0x03 + rssi_temp
+            # self.cfg_reg[10] = h_crypt
+            # self.cfg_reg[11] = l_crypt
 
-        for i in range(3):
-            written = self.ser.write(bytes(self.cfg_reg)) # write config to registers
-            while self.ser.out_waiting > 0:
-                time.sleep(0.01)
-            print("Written: ", written, "of", len(self.cfg_reg))
-
-            # Wait longer during retries, this lowers the configuration time for higher baud-rates
-            time.sleep(1+i*2) # wait for 1, 3, 5 seconds when applying settings
-
-            if self.ser.inWaiting() > 0:
-                time.sleep(0.5)
-                r_buff = self.ser.read(self.ser.inWaiting()) # Read answer from buffer
-                if r_buff[0] == 0xC1:
-                    pass
-                else:
-                    print(f"Unexpected response encountered during lora configuration:{r_buff}")
-                break
+        # TODO: Decide if we should warn or throw Exceptions here
+        # TODO: Decide 
+        cfg_reg_host = bytes(self.cfg_reg)
+        written = self.ser.write(cfg_reg_host)
+        if written != len(cfg_reg_host):
+            print(f"WARNING: missmatch in amount of written bytes {len(cfg_reg_host)} != {written}")
+        else: 
+            r_buff = self.ser.read(12)
+            # print(r_buff)
+            if r_buff[1::] == cfg_reg_host[1::]:
+                print(f"SUCCESS: r_buff matches cfg_reg")
             else:
-                print("Missing response during lora configuration, trying again")
-                pass
+                print(f"WARNING: missmatch between written and returned configuration\nwritten : {cfg_reg_host}\nreceived: {r_buff}")
+       
+        # TODO: Rewrite this entire section, verify that settings have been applied correctly, read reply with timeout instead of using break and pass 
+        # * Previous version of register configuration
+        # for i in range(3):
+        #     written = self.ser.write(bytes(self.cfg_reg)) # write config to registers
+        #     while self.ser.out_waiting > 0:
+        #         time.sleep(0.01)
+        #     # print("Written: ", self.ser.out_waiting, "of", len(self.cfg_reg))
+
+        #     # Wait longer during retries, this lowers the configuration time for higher baud-rates
+        #     time.sleep(1+i*2) # wait for 1, 3, 5 seconds when applying settings
+
+        #     if self.ser.inWaiting() > 0:
+        #         time.sleep(0.5)
+        #         r_buff = self.ser.read(self.ser.inWaiting()) # Read answer from buffer
+        #         if r_buff[0] == 0xC1:
+        #             print(bytearray(r_buff))
+        #             pass
+        #         else:
+        #             print(f"Unexpected response encountered during lora configuration:{r_buff}")
+        #         break
+        #     else:
+        #         print("Missing response during lora configuration, trying again")
+        #         pass
         
-
-        # TODO: Consider removing this section, it fetches settings without doing anything with the settings
-        self.ser.write(bytes([0xC1,0x00,0x09]))
-
-        timeout = 5
-        starttime = time.time()
-        deltatime = 0
-
-        while self.ser.in_waiting < 1:
-            print( f'\r{self.ser.in_waiting}', end="", flush=True)
-            deltatime = time.time() - starttime
-            time.sleep(0.01)
-            if deltatime > timeout:
-                print("\nWARNING: TIMED OUT", end="")
-                break
-            print()
-            print(f"waited {deltatime} seconds to change settings")
-
         self.ser.reset_input_buffer() # clear the input buffer
         self.ser.reset_output_buffer() # clear the output buffer
 
@@ -254,11 +270,11 @@ class sx126x:
 
     def get_config(self):
         # the pin M1 of lora HAT must be high when enter setting mode and get parameters
-        #print(self.ser.baudrate)
-        GPIO.output(self.M1,GPIO.HIGH)
+        GPIO.output(self.M0, GPIO.LOW)
+        GPIO.output(self.M1, GPIO.HIGH)
         time.sleep(0.1)
         self.ser.close()
-        self.ser = serial.Serial(self.serial_n,self.conf_baudrate, timeout=self.timeout)
+        self.ser = serial.Serial(self.serial_n,self.SX126X_CONF_UART_BAUDRATE, timeout=self.timeout)
         # send command to get setting parameters
         self.ser.flushInput()
         time.sleep(0.1)
@@ -280,7 +296,7 @@ class sx126x:
         # check the return characters from hat and print the setting parameters
         if self.get_reg[0] == 0xC1 and self.get_reg[2] == 0x09:
             addr_temp = (self.get_reg[3] << 8) + self.get_reg[4] 
-            air_speed_temp = self.get_reg[6] & 0x07
+            air_speed_temp = self.get_reg[6] & 0x07 
             power_temp = self.get_reg[7] & 0x03
             fre_temp = self.get_reg[8]
             
@@ -309,11 +325,11 @@ class sx126x:
         self.ser.write(data)
 
         # THIS SECTION WAITS FOR AUX TO REACT
-        st = time.perf_counter()
+        # st = time.perf_counter()
         while GPIO.input(self.AUX) == 1:
             # time.sleep(0.0001) # Alternative to busy wait
             pass
-        et = time.perf_counter()
+        # et = time.perf_counter()
         # print(f"time until aux reacted: {et - st}")
 
         while self.ser.out_waiting > 0 or GPIO.input(self.AUX) == 0:
@@ -340,6 +356,8 @@ class sx126x:
             packet_size = r_buff[3]
             # ! THIS SECTION LOOPS INDEFINETLY IF PACKET SIZE HEADER IS CORRUPTED
             # TODO: ADD DETECTION OF BROKEN PACKETS, THEY SHOULD BE DROPPED (like udp)
+            # TODO: Test this with packets larger than single packet sizes
+            # TODO: Make this work when using mode that doesn't include sender ip in header 
             while True: 
                 r_buff += self.ser.read() 
                 if len(r_buff) == packet_size-3: 
@@ -364,7 +382,7 @@ class sx126x:
             
     def receive_time(self, listen_time):
         """
-        ### blocking receive
+        ### Read incoming buffer for set time
 
         ### Returns 
         None: object when no packet inbound.\n        
@@ -372,8 +390,8 @@ class sx126x:
         
         tuple (bytes, rssi) if rssi is enabled
         """
-        # 
-        if self.ser.inWaiting() > 4: # This could be 1
+        # This receive does not use the message length header field, instead it reads the buffer for a set period.
+        if self.ser.inWaiting() > 0: 
             r_buff = ""
             starttime = time.time()
             deltatime = time.time()
@@ -384,7 +402,7 @@ class sx126x:
             msg = r_buff
             print(f"msg: {msg}")
             return msg
-    
+        
 
     def get_channel_rssi(self):
         """
