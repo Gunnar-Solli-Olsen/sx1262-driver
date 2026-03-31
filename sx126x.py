@@ -24,7 +24,7 @@ class sx126x:
     #
     # E22-400T22S           E22-900T22S
     # 410~493MHz      or    850~930MHz
-    start_freq = 850
+    start_freq = 850 # Why is this here 
 
     #
     # offset between start and end frequence of two lora module
@@ -62,6 +62,12 @@ class sx126x:
     SX126X_PACKAGE_SIZE_64_BYTE = 0x80
     SX126X_PACKAGE_SIZE_32_BYTE = 0xC0
 
+    lora_buffer_size_dic = {
+        240:SX126X_PACKAGE_SIZE_240_BYTE,
+        128:SX126X_PACKAGE_SIZE_128_BYTE,
+        64:SX126X_PACKAGE_SIZE_64_BYTE,
+        32:SX126X_PACKAGE_SIZE_32_BYTE
+    }
     # what the hell is this, these constants are never used
     SX126X_Power_22dBm = 0x00
     SX126X_Power_17dBm = 0x01
@@ -75,16 +81,8 @@ class sx126x:
         10:0x03
     }
 
-    lora_buffer_size_dic = {
-        240:SX126X_PACKAGE_SIZE_240_BYTE,
-        128:SX126X_PACKAGE_SIZE_128_BYTE,
-        64:SX126X_PACKAGE_SIZE_64_BYTE,
-        32:SX126X_PACKAGE_SIZE_32_BYTE
-    }
 
-    def __init__(self,serial_num,freq,addr,power,rssi,prev_baud_rate:int|None=None, uart_baudrate=9600,air_speed=2400,\
-                 net_id=0,buffer_size = 240,crypt=0,\
-                 relay=False,lbt=False,wor=False, timeout:float|None=None):
+    def __init__(self,serial_num,freq,addr,power,rssi,prev_baud_rate:int|None=None, uart_baudrate=9600,air_speed=2400, net_id=0,buffer_size = 240,crypt=0,relay=False,lbt=False,wor=False, timeout:float|None=None, info:bool=False, warning:bool=True, debug:bool=False):
         """
         Params:
             serial_num (string): Serial port number (default "/dev/ttyAMA0" for RPi w. debian)
@@ -108,6 +106,9 @@ class sx126x:
         self.power = power
         self.baudrate = uart_baudrate
         self.timeout = timeout
+        self.info = info
+        self.warning = warning
+        self.debug = debug
         # Initial the GPIO for M0 and M1 Pin
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
@@ -117,11 +118,12 @@ class sx126x:
         GPIO.output(self.M1,GPIO.HIGH)
         # ! AUX PIN IS 1 WHEN E22-900T22S SEND BUFFER IS EMPTY
         GPIO.setup(self.AUX,GPIO.IN) 
-
+        time.sleep(0.1) # Sleep so device has time to react
         # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0 (or you can map it to another one manually if you are a nerd)
         self.ser = serial.Serial(serial_num, self.SX126X_CONF_UART_BAUDRATE, timeout=self.timeout)
         self.ser.flushInput()
 
+        self.device_model = self.get_device_model()
         self.set(freq,addr,power,rssi,uart_baudrate,air_speed,net_id,buffer_size,crypt,relay,lbt,wor)
 
         self.ser.close()
@@ -142,33 +144,45 @@ class sx126x:
         low_addr = addr & 0xff
         high_addr = addr >> 8 & 0xff
         net_id_temp = net_id & 0xff
-        if freq > 850: 
-            freq_temp = freq - 850
-            self.start_freq = 850
-            self.offset_freq = freq_temp
+        if self.debug: print(f"DEBUG: device model:{self.device_model}")
+
+        # TODO: Use AT command to get other device models, this software is currently known to work with a single device so the first check could be to verify the return being "DEVTYPE=E22-900T22S", and throw exception when missmatches between frequency and used device is detected.
+        if self.device_model == b"E22-900T22S":
+                
+            if freq > 850: 
+                freq_temp = freq - 850
+                self.start_freq = 850
+                self.offset_freq = freq_temp
+                if self.debug: print(f"DEBUG: frequency: {freq} ({freq_temp})")
+            else:
+                raise Exception("Frequency outside valid range (850 to 930)", freq)
+            
         elif freq > 410:
-            print("WARNING: This code is untested for the sx1268-433M")
-            freq_temp = freq - 410
-            self.start_freq  = 410
-            self.offset_freq = freq_temp 
+            raise Exception("This code is untested for the sx1268-433M")
+            # print("WARNING: ")
+            # freq_temp = freq - 410
+            # self.start_freq  = 410
+            # self.offset_freq = freq_temp 
+        else:
+            raise Exception("Device not recognized")
             
         # TODO: Add range checks for the selected frequency
         # TODO: Change the frequency selection so the developer gets warned when selecting invalid freq.
-        # TODO: Use AT command to get device model, this software is currently known to work with a single device so the first check could be to verify the return being "DEVTYPE=E22-900T22S", and throw exception when missmatches between frequency and used device is detected.
-
-        if air_speed > uart_baudrate:
-            print("WARNING: Air Rate is higher than baudrate, this can lead to receiver side buffer overflows (device receives data faster than it can send it to host)")
+        if air_speed >= uart_baudrate:
+            if self.warning: print("WARNING: Air Rate is equal or higher than baudrate, this can lead to receiver side buffer overflows (device receives data faster than it can send it to host)")
 
         air_speed_temp = self.lora_air_speed_dic.get(air_speed,None)
         if air_speed_temp is None:
             raise Exception("Air speed not recognized", air_speed)
         
         buffer_size_temp = self.lora_buffer_size_dic.get(buffer_size,None)
-        # if air_speed_temp != None:
+        if buffer_size_temp is None:
+            raise Exception("Buffer size not recognized", buffer_size)
         
         power_temp = self.lora_power_dic.get(power,None)
-        #if power_temp != None:
-
+        if power_temp is None:
+            raise Exception("Transmission power not recognized", power)
+        if self.debug: print(f"DEBUG: transmission power: {power}")
         # TODO: Consider splitting the packet rssi value from the noise rssi value 
         if rssi: 
             # enable printing rssi values
@@ -196,10 +210,10 @@ class sx126x:
             # The HAT will output a packet rssi value following received message
             # when the eighth bit with 06H register(rssi_temp = 0x80) is enabled
             #
-            self.cfg_reg[9] = 0x03 + rssi_temp 
+            self.cfg_reg[9] = 0x43 + rssi_temp  # 0x43 enables point to point transmission, 0x03 enables transparent transmission, this requires WoR to be enabled with sender manually set to sender (which needs a bunch more work)
             self.cfg_reg[10] = h_crypt
             self.cfg_reg[11] = l_crypt
-            print(bytearray(self.cfg_reg))
+            if self.info: print(f"INFO: Setting device config : {bytearray(self.cfg_reg)}")
         else:
             raise Exception("Relay mode has not been implemented yet")
             # TODO: Implement repeater mode
@@ -223,19 +237,19 @@ class sx126x:
             # self.cfg_reg[10] = h_crypt
             # self.cfg_reg[11] = l_crypt
 
-        # TODO: Decide if we should warn or throw Exceptions here
-        # TODO: Decide 
+        # TODO: Decide if we should warn or throw Exceptions about different configuration being returned on writing config
+
         cfg_reg_host = bytes(self.cfg_reg)
         written = self.ser.write(cfg_reg_host)
         if written != len(cfg_reg_host):
-            print(f"WARNING: missmatch in amount of written bytes {len(cfg_reg_host)} != {written}")
+            if self.warning: print(f"WARNING: missmatch in amount of written bytes {len(cfg_reg_host)} != {written}")
         else: 
             r_buff = self.ser.read(12)
             # print(r_buff)
             if r_buff[1::] == cfg_reg_host[1::]:
-                print(f"SUCCESS: r_buff matches cfg_reg")
+                if self.info: print(f"SUCCESS: r_buff matches cfg_reg")
             else:
-                print(f"WARNING: missmatch between written and returned configuration\nwritten : {cfg_reg_host}\nreceived: {r_buff}")
+                if self.warning: print(f"WARNING: missmatch between written and returned configuration\nwritten : {cfg_reg_host}\nreceived: {r_buff}")
        
         # TODO: Rewrite this entire section, verify that settings have been applied correctly, read reply with timeout instead of using break and pass 
         # * Previous version of register configuration
@@ -311,10 +325,24 @@ class sx126x:
         GPIO.output(self.M1,GPIO.LOW)
         return self.get_reg[3::]
 
+    def get_device_model(self):
+        '''
+        Get model of device (e.g. b"E22-900T22S")
+
+        returns device model saved from startup, reads device model using AT command when in configuration mode
+        '''
+        # if GPIO.input(self.M0) != GPIO.LOW or GPIO.input(self.M1) != GPIO.HIGH:
+        #     return self.device_model
+        self.ser.write(b"AT+DEVTYPE=?")
+        time.sleep(0.5) # hardcoded might be bad here idk
+        device_model = self.ser.read_all()
+        return device_model[8:19]
+    
     def send(self,data:bytes|bytearray):
         """
         the data format like as following "node address,frequence,payload" "20,868,Hello World\"
         """
+        # print(f"M1 : {GPIO.input(self.M1)}")
         # print(f"AUX pre : {GPIO.input(self.AUX)}")
         
         while self.ser.out_waiting > 0 or GPIO.input(self.AUX) == 0:
@@ -325,18 +353,26 @@ class sx126x:
         self.ser.write(data)
 
         # THIS SECTION WAITS FOR AUX TO REACT
-        # st = time.perf_counter()
-        while GPIO.input(self.AUX) == 1:
+        if self.debug: st = time.perf_counter()
+        while GPIO.input(self.AUX) == 1:# TODO: might be good with a timeout here
             # time.sleep(0.0001) # Alternative to busy wait
             pass
-        # et = time.perf_counter()
-        # print(f"time until aux reacted: {et - st}")
+        if self.debug:
+            et = time.perf_counter()
+            print(f"DEBUG: time until aux reacted: {et - st}")
 
-        while self.ser.out_waiting > 0 or GPIO.input(self.AUX) == 0:
-            time.sleep(0.001)
+        # # TODO: TEST IF THIS IS NEEDED, REMOVING IT COULD INCREASE SINGLE MESSAGE PERFORMANCE (wait until aux has reacted, then wait until aux is ready)
+        # while self.ser.out_waiting > 0 or GPIO.input(self.AUX) == 0:
+        #     time.sleep(0.001)
 
+
+        # if self.debug: 
+        #     msg_transmit_time = time.perf_counter() - et
+        #     print(f"DEBUG: total aux working time: {msg_transmit_time}")
+
+        # Should RSSI be here? 
         if self.rssi == True:
-            self.get_channel_rssi()
+            self.get_channel_rssi() 
         
     def receive(self):
         """
@@ -349,13 +385,13 @@ class sx126x:
         bytes, or tuple (bytes, rssi) when rssi is enabled
         """
         if self.ser.inWaiting() > 4: 
-            # read first 4 bytes 
+            # wait for first 4 bytes 
             
             r_buff = self.ser.read(4)
             # 4th byte contains tot. number of bytes in packet
             packet_size = r_buff[3]
             # ! THIS SECTION LOOPS INDEFINETLY IF PACKET SIZE HEADER IS CORRUPTED
-            # TODO: ADD DETECTION OF BROKEN PACKETS, THEY SHOULD BE DROPPED (like udp)
+            # TODO: ADD DETECTION OF BROKEN PACKETS, THEY SHOULD BE DROPPED (like udp) (firmware does this, but it doesn't guarantee buffer overflows after and before reception)
             # TODO: Test this with packets larger than single packet sizes
             # TODO: Make this work when using mode that doesn't include sender ip in header 
             while True: 
@@ -400,7 +436,7 @@ class sx126x:
                 r_buff += self.ser.read() 
 
             msg = r_buff
-            print(f"msg: {msg}")
+            # print(f"msg: {msg}")
             return msg
         
 
