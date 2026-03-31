@@ -8,7 +8,7 @@ class LoRa:
     # SERIAL PORT IS RPi SPECIFIC
     #
     
-    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/serial0", power=22, rssi=False, uart_baudrate=9600, air_speed=2400, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
+    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/AMA0", power=22, rssi=False, uart_baudrate=9600, air_speed=2400, net_id=0, packet_size:int=240, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
         self.freq = FREQ
         self.channel = CHANNEL
         self.serial_port = SERIAL_PORT
@@ -19,13 +19,15 @@ class LoRa:
         self.power = power
         self.uart_baudrate = uart_baudrate
         self.air_speed = air_speed
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=rssi, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=timeout) 
+        self.net_id = net_id
+        self.packet_size = packet_size
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=rssi, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, net_id=self.net_id, packet_size=packet_size, timeout=timeout, debug=debug, info=info) 
         self.SX126X_UART_BAUDRATE = self.lora_node.SX126X_UART_BAUDRATE
 
-    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,prev_uart_baudrate=None, uart_baudrate=9600, air_speed=2400,relay=False,timeout:float|None=None):
-        return sx126x.sx126x(serial_num,freq, addr, power, rssi, prev_uart_baudrate, uart_baudrate, air_speed, relay, timeout=timeout)
+    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,prev_uart_baudrate=None, uart_baudrate=9600, air_speed=2400, net_id=0, packet_size=240, relay=False,timeout:float|None=None, debug:bool=False, info:bool=True):
+        return sx126x.sx126x(serial_num,freq, addr, power, rssi, prev_uart_baudrate, uart_baudrate, air_speed, net_id, buffer_size=packet_size, relay=relay, timeout=timeout, debug=debug, info=info)
     
-    def change_settings(self, FREQ = None, CHANNEL = None, SERIAL_PORT=None, power:int|None=None, uart_baudrate=None, air_speed:int|None=None, timeout:float|None=None):
+    def change_settings(self, FREQ = None, CHANNEL = None, SERIAL_PORT=None, power:int|None=None, uart_baudrate=None, air_speed:int|None=None, net_id:int|None=None, packet_size:int|None=None, timeout:float|None=None):
         # if new value, set value to new value 
         print("changing settings...")
         if FREQ: self.freq = FREQ
@@ -38,9 +40,11 @@ class LoRa:
             old_baud_rate = self.lora_node.ser.baudrate
             if self.debug: print("DEBUG: previous baudrate:", old_baud_rate)
         if air_speed: self.air_speed = air_speed
+        if net_id: self.net_id = net_id
+        if packet_size: self.packet_size = packet_size
         if timeout: self.timeout = timeout
         
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, prev_uart_baudrate=old_baud_rate, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, timeout=self.timeout) 
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, prev_uart_baudrate=old_baud_rate, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, net_id=self.net_id, packet_size=self.packet_size, timeout=self.timeout, debug=self.debug) 
 
     def checksum(self, data:bytes|bytearray):
         """
@@ -57,10 +61,10 @@ class LoRa:
         """
         address_dest = destination.to_bytes(2)
         address_sender = sender.to_bytes(2)
-        # TODO: figure out what 18 and 12 mean in this context (dogmaticly adding them currently)
         packet_size = (7+len(content)).to_bytes()
-
-        packet = address_dest + bytes([18]) + address_sender + bytes([12]) + packet_size + bytes(content)
+        sender_net_id = bytes([self.freq - 850])
+        # bytes([18]) -> 850 + 18 = 868 mhz
+        packet = address_dest + bytes([18]) + address_sender + sender_net_id + packet_size + bytes(content)
         return packet
 
     
@@ -180,10 +184,13 @@ class LoRa:
         if address.bit_length() > 16:
             raise Exception("INVALID ADDRESS LENGTH")
         if len(data) > 233 and self.warning:
-            print("WARNING: data does not fit in a single LoRa message")
-
-        packet = self.pack_packet(address, self.channel, bytes(len(data).to_bytes()) + bytes(data))
-        if self.debug: print("DEBUG: Packet: ", packet)
+            # this should be handled better
+            print("WARNING: data does not fit in a single LoRa message") 
+        packet = self.pack_packet(address, self.channel, bytes(data))
+        if self.debug: 
+            print("DEBUG: Packet: ", packet)
+            print(f"DEBUG: length: {len(packet)}")
+            
         self.lora_node.send(packet)
 
     def raw_recv(self):
@@ -191,17 +198,6 @@ class LoRa:
         if ret:
             if self.debug: print("DEBUG: Reading incoming packet")
             return ret
-        
-            # incoming_data = bytes()
-            # received = False
-            # packet = None
-            # while not received: # This should be changed to add a 
-            #     packet = self.lora_node.receive()
-            #     if packet:
-            #         received = True
-            #         incoming_data += bytearray(packet[4::])
-            #     time.sleep(0.1)
-            # return incoming_data
 
     def sleep(self):
         """
