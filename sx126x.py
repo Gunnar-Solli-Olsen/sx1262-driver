@@ -146,7 +146,8 @@ class sx126x:
         net_id_temp = net_id & 0xff
         if self.debug: print(f"DEBUG: device model:{self.device_model}")
 
-        # TODO: Use AT command to get other device models, this software is currently known to work with a single device so the first check could be to verify the return being "DEVTYPE=E22-900T22S", and throw exception when missmatches between frequency and used device is detected.
+        # TODO: Use AT command to get other device models, this software is currently known to work with a single device so the first check could be to verify the return being "DEVTYPE=E22-900T22S", and throw exception when missmatches between frequency and used device is detected. 
+        # ? AT command is not the only way to get the device model, C0 command also yields device name
         if self.device_model == b"E22-900T22S":
                 
             if freq > 850: 
@@ -164,7 +165,7 @@ class sx126x:
             # self.start_freq  = 410
             # self.offset_freq = freq_temp 
         else:
-            raise Exception("Device not recognized")
+            raise Exception(f"Device not recognized: {self.device_model}")
             
         # TODO: Add range checks for the selected frequency
         # TODO: Change the frequency selection so the developer gets warned when selecting invalid freq.
@@ -183,20 +184,24 @@ class sx126x:
         if power_temp is None:
             raise Exception("Transmission power not recognized", power)
         if self.debug: print(f"DEBUG: transmission power: {power}")
-        # TODO: Consider splitting the packet rssi value from the noise rssi value 
+        
         if rssi: 
             # enable printing rssi values
             rssi_temp = 0x80  # This appends every message and has some performance impact 
-            rssi_noise = 0x20 # This enables command {0xC0, 0xC1, 0xC2, 0xC3} in transmission and WoR modes to get current ambient noise
         else:
             # disable print rssi value
             rssi_temp = 0x00        
+        
+        if rssi: # TODO: add separate value for rssi noise
+            rssi_noise = 0x20 # This enables command {0xC0, 0xC1, 0xC2, 0xC3} in transmission and WoR modes to get current ambient noise
+        else:
             rssi_noise = 0x00
 
         # get crypt
         l_crypt = crypt & 0xff
         h_crypt = crypt >> 8 & 0xff
-        
+
+        # TODO: Add support for transparent transmitting mode
         if relay==False:
             self.cfg_reg[3] = high_addr
             self.cfg_reg[4] = low_addr
@@ -340,7 +345,11 @@ class sx126x:
     
     def send(self,data:bytes|bytearray):
         """
-        the data format like as following "node address,frequence,payload" "20,868,Hello World\"
+        Send uses the first two bytes as destination address, one byte for net_id (frequency)
+
+        [address low] [address high] [net_id] [sender address low] [ sender address high] [content length] 
+
+        The sender's net_id will be added in a future update
         """
         # print(f"M1 : {GPIO.input(self.M1)}")
         # print(f"AUX pre : {GPIO.input(self.AUX)}")
@@ -383,6 +392,8 @@ class sx126x:
         bytes: object when packet inbound.\n
         
         bytes, or tuple (bytes, rssi) when rssi is enabled
+
+        this receive function assumes that the first two bytes include the address of the sender, and the third the length of the message. #TODO: Change this to add net_id to header
         """
         if self.ser.inWaiting() > 4: 
             # wait for first 4 bytes 
@@ -451,7 +462,7 @@ class sx126x:
         while GPIO.input(4) == 0:
             pass
         self.ser.flushInput()
-        self.ser.write(bytes([0xC0,0xC1,0xC2,0xC3,0x00,0x02])) # magic bytes
+        self.ser.write(bytes([0xC0,0xC1,0xC2,0xC3,0x00,0x02])) 
         time.sleep(0.5)
         re_temp = bytes(5)
         if self.ser.inWaiting() > 0:
