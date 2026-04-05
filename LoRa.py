@@ -61,9 +61,10 @@ class LoRa:
         """
         address_dest = destination.to_bytes(2)
         address_sender = sender.to_bytes(2)
-        packet_size = (7+len(content)).to_bytes()
+        packet_size = (4+len(content)).to_bytes() # 4 bytes included in header
         sender_net_id = bytes([self.freq - 850])
         # bytes([18]) -> 850 + 18 = 868 mhz
+        # TODO: Add conditional for supporting transparent and point to point, currently first three bytes are used for point to point 
         packet = address_dest + bytes([18]) + address_sender + sender_net_id + packet_size + bytes(content)
         return packet
 

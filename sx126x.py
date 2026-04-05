@@ -132,7 +132,7 @@ class sx126x:
 
     def set(self,freq,addr,power,rssi,uart_baudrate=9600,air_speed=2400,\
             net_id=0,buffer_size = 240,crypt=0,\
-            relay=False,lbt=False,wor=False):
+            relay=False, point_to_point:bool=True,lbt=False,wor=False):
         self.addr = addr
         # We should pull up the M1 pin when sets the module
         GPIO.output(self.M0,GPIO.LOW)
@@ -147,7 +147,7 @@ class sx126x:
         if self.debug: print(f"DEBUG: device model:{self.device_model}")
 
         # TODO: Use AT command to get other device models, this software is currently known to work with a single device so the first check could be to verify the return being "DEVTYPE=E22-900T22S", and throw exception when missmatches between frequency and used device is detected. 
-        # ? AT command is not the only way to get the device model, C0 command also yields device name
+        # ? AT command is not the only way to get the device model, C0 command also yields device name in last two bytes
         if self.device_model == b"E22-900T22S":
                 
             if freq > 850: 
@@ -197,6 +197,13 @@ class sx126x:
         else:
             rssi_noise = 0x00
 
+        if point_to_point:
+            # 0x40 enables point to point transmission
+            transmission_mode = 0x40
+        else:
+            # 0x00 enables transparent transmission
+            transmission_mode = 0x00 # ! THIS CHANGES WHAT MUST BE WRITTEN DURING SEND (and recv doesn't really need the sender address and net_id)
+
         # get crypt
         l_crypt = crypt & 0xff
         h_crypt = crypt >> 8 & 0xff
@@ -215,7 +222,10 @@ class sx126x:
             # The HAT will output a packet rssi value following received message
             # when the eighth bit with 06H register(rssi_temp = 0x80) is enabled
             #
-            self.cfg_reg[9] = 0x43 + rssi_temp  # 0x43 enables point to point transmission, 0x03 enables transparent transmission, this requires WoR to be enabled with sender manually set to sender (which needs a bunch more work)
+            self.cfg_reg[9] = transmission_mode + 0x03 + rssi_temp 
+
+            # WoR requires the sender to be manually set to sender, and receiver set to receiver.
+
             self.cfg_reg[10] = h_crypt
             self.cfg_reg[11] = l_crypt
             if self.info: print(f"INFO: Setting device config : {bytearray(self.cfg_reg)}")
@@ -405,22 +415,23 @@ class sx126x:
             # TODO: ADD DETECTION OF BROKEN PACKETS, THEY SHOULD BE DROPPED (like udp) (firmware does this, but it doesn't guarantee buffer overflows after and before reception)
             # TODO: Test this with packets larger than single packet sizes
             # TODO: Make this work when using mode that doesn't include sender ip in header 
+            if self.debug: print(f"DEBUG: r_buff: {r_buff}")
+            if self.debug: print(f"DEBUG: Reading {packet_size} bytes")
             while True: 
                 r_buff += self.ser.read() 
-                if len(r_buff) == packet_size-3: 
+                # if self.debug: print(f"DEBUG: r_buff: {r_buff}\r", end='')
+                if len(r_buff) == packet_size: 
                     #self.ser.inWaiting()  # This line does nothing? 
                     break
-
+            # if self.debug: print()
             msg = r_buff
             
             # print the rssi
             if self.rssi:
 
-                # ! THIS CODE IS A GUESS AT BEST, DO NOT TRUST IT
+                # Read rssi packet signal strength/clarity byte 
                 r_buff += self.ser.read()  
-                # ! THIS CODE IS A GUESS AT BEST, DO NOT TRUST IT
 
-                # TODO: Check if rssi still works
                 print("the packet rssi value: -{0}dBm".format(256-r_buff[-1:][0]))
                 # self.get_channel_rssi()
                 return (msg, (256-r_buff[-1:][0]))
@@ -439,12 +450,12 @@ class sx126x:
         """
         # This receive does not use the message length header field, instead it reads the buffer for a set period.
         if self.ser.inWaiting() > 0: 
-            r_buff = ""
+            r_buff = b""
             starttime = time.time()
             deltatime = time.time()
             while deltatime - starttime < listen_time: 
                 deltatime = time.time()
-                r_buff += self.ser.read() 
+                r_buff += self.ser.read_all() 
 
             msg = r_buff
             # print(f"msg: {msg}")
