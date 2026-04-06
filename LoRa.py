@@ -55,7 +55,7 @@ class LoRa:
         result = checksum_generator.digest()
         return result
 
-    def pack_packet(self, destination:int, sender:int, content:bytes|bytearray):
+    def pack_packet(self, destination:int, sender:int, content:bytes|bytearray, freq=[18]):
         """
         creates bytes object that includes destination, sender, length of packet, and content in packet.
         """
@@ -65,7 +65,8 @@ class LoRa:
         sender_net_id = bytes([self.freq - 850])
         # bytes([18]) -> 850 + 18 = 868 mhz
         # TODO: Add conditional for supporting transparent and point to point, currently first three bytes are used for point to point 
-        packet = address_dest + bytes([18]) + address_sender + sender_net_id + packet_size + bytes(content)
+        # TODO: TEST THAT FREQ WORKS
+        packet = address_dest + bytes(freq) + address_sender + sender_net_id + packet_size + bytes(content)
         return packet
 
     
