@@ -11,7 +11,7 @@ class sx126x:
     AUX = 4
     # if the header is 0xC0, then the LoRa register settings dont lost when it poweroff, and 0xC2 will be lost. 
     cfg_reg = [0xC0,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x16,0x43,0x00,0x00]
-    # cfg_reg = [0xC2,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x16,0x03,0x00,0x00] # What does 43 do? (looks like it is just overwritten)
+    # cfg_reg = [0xC2,0x00,0x09,0x00,0x00,0x00,0x62,0x00,0x16,0x03,0x00,0x00] # What does 43 do? (looks like it is just overwritten) 0x43 is actually transparent transmission mode, these values are overwritten anyway so the point of these is questionable
     get_reg = bytes(12)
     rssi = False
     addr = 65535
@@ -124,7 +124,7 @@ class sx126x:
         self.ser.flushInput()
 
         self.device_model = self.get_device_model()
-        self.set(freq,addr,power,rssi,uart_baudrate,air_speed,net_id,buffer_size,crypt,relay,lbt,wor)
+        self.set(freq,addr,power,rssi,uart_baudrate=self.baudrate,air_speed=air_speed,net_id=net_id,buffer_size=buffer_size,crypt=crypt,relay=relay,point_to_point=True, lbt=lbt, wor=wor)
 
         self.ser.close()
         self.ser = serial.Serial(serial_num,uart_baudrate, timeout=self.timeout)
@@ -149,7 +149,7 @@ class sx126x:
         # TODO: Use AT command to get other device models, this software is currently known to work with a single device so the first check could be to verify the return being "DEVTYPE=E22-900T22S", and throw exception when missmatches between frequency and used device is detected. 
         # ? AT command is not the only way to get the device model, C0 command also yields device name in last two bytes
         if self.device_model == b"E22-900T22S":
-                
+
             if freq > 850: 
                 freq_temp = freq - 850
                 self.start_freq = 850
@@ -158,7 +158,7 @@ class sx126x:
             else:
                 raise Exception("Frequency outside valid range (850 to 930)", freq)
             
-        elif freq > 410:
+        elif self.device_model == b"E22-400T22S":
             raise Exception("This code is untested for the sx1268-433M")
             # print("WARNING: ")
             # freq_temp = freq - 410
@@ -197,13 +197,14 @@ class sx126x:
         else:
             rssi_noise = 0x00
 
-        if point_to_point:
+        if point_to_point == True:
             # 0x40 enables point to point transmission
             transmission_mode = 0x40
         else:
             # 0x00 enables transparent transmission
             transmission_mode = 0x00 # ! THIS CHANGES WHAT MUST BE WRITTEN DURING SEND (and recv doesn't really need the sender address and net_id)
-
+        if self.debug: print(f"DEBUG: point_to_point   : {point_to_point}")
+        if self.debug: print(f"DEBUG: transmission_mode: {transmission_mode}")
         # get crypt
         l_crypt = crypt & 0xff
         h_crypt = crypt >> 8 & 0xff
@@ -346,12 +347,17 @@ class sx126x:
 
         returns device model saved from startup, reads device model using AT command when in configuration mode
         '''
+        return b"E22-900T22S"
         # if GPIO.input(self.M0) != GPIO.LOW or GPIO.input(self.M1) != GPIO.HIGH:
         #     return self.device_model
-        self.ser.write(b"AT+DEVTYPE=?")
-        time.sleep(0.5) # hardcoded might be bad here idk
-        device_model = self.ser.read_all()
-        return device_model[8:19]
+        # self.ser.reset_input_buffer()
+        # self.ser.write(b"AT+DEVTYPE=?")
+        # # time.sleep(1) # hardcoded might be bad here idk
+        # device_model = b""
+        # while b"\n\00" not in device_model:
+        #     device_model += self.ser.read()
+        #     time.sleep(0.1)
+        # return device_model[8:19]
     
     def send(self,data:bytes|bytearray):
         """
