@@ -58,15 +58,17 @@ class LoRa:
     def pack_packet(self, destination:int, sender:int, content:bytes|bytearray, freq=[18]):
         """
         creates bytes object that includes destination, sender, length of packet, and content in packet.
+
+        Sender address should be considered part of the content
         """
         address_dest = destination.to_bytes(2)
-        address_sender = sender.to_bytes(2)
         packet_size = (4+len(content)).to_bytes() # 4 bytes included in header
+        address_sender = sender.to_bytes(2)
         sender_net_id = bytes([self.freq - 850])
         # bytes([18]) -> 850 + 18 = 868 mhz
         # TODO: Add conditional for supporting transparent and point to point, currently first three bytes are used for point to point 
         # TODO: TEST THAT FREQ WORKS
-        packet = address_dest + bytes(freq) + address_sender + sender_net_id + packet_size + bytes(content)
+        packet = address_dest + bytes(freq) + packet_size + address_sender + sender_net_id + bytes(content)
         return packet
 
     
@@ -181,7 +183,7 @@ class LoRa:
                 self.lora_node.send(self.pack_packet(sender_address, self.channel, bytes(checksum)))
 
     # TODO: Add feature to select message size
-    def raw_send(self, address, data:bytes|bytearray):
+    def raw_send(self, address, data:bytes|bytearray, freq=[18]):
 
         if address.bit_length() > 16:
             raise Exception("INVALID ADDRESS LENGTH")

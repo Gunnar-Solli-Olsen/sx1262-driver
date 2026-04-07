@@ -363,9 +363,12 @@ class sx126x:
         """
         Send uses the first two bytes as destination address, one byte for net_id (frequency)
 
-        [address low] [address high] [net_id] [sender address low] [ sender address high] [content length] 
+        DO NOT INCLUDE ADDRESS AND NETID IF USING TRANSPARENT MODE 
+        [address low] [address high] [net_id] [content length] 
 
-        The sender's net_id will be added in a future update
+        The sender's address and net_id should be included as content
+
+        [sender address low] [ sender address high] [ sender net_id ]
         """
         # print(f"M1 : {GPIO.input(self.M1)}")
         # print(f"AUX pre : {GPIO.input(self.AUX)}")
@@ -411,12 +414,12 @@ class sx126x:
 
         this receive function assumes that the first two bytes include the address of the sender, and the third the length of the message. #TODO: Change this to add net_id to header
         """
-        if self.ser.inWaiting() > 4: 
-            # wait for first 4 bytes 
+        if self.ser.inWaiting() > 2: 
+            # wait for first 2 bytes 
             
-            r_buff = self.ser.read(4)
-            # 4th byte contains tot. number of bytes in packet
-            packet_size = r_buff[3]
+            r_buff = self.ser.read(1)
+            # 1st byte contains tot. number of bytes in packet
+            packet_size = r_buff[0]
             # ! THIS SECTION LOOPS INDEFINETLY IF PACKET SIZE HEADER IS CORRUPTED
             # TODO: ADD DETECTION OF BROKEN PACKETS, THEY SHOULD BE DROPPED (like udp) (firmware does this, but it doesn't guarantee buffer overflows after and before reception)
             # TODO: Test this with packets larger than single packet sizes
