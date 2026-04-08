@@ -18,7 +18,6 @@ class sx126x:
     serial_n = ""
     addr_temp = 0
     prev_baud_rate = None
-    point_to_point = True
     #
     # start frequence of two lora module
     #
@@ -82,7 +81,7 @@ class sx126x:
     }
 
 
-    def __init__(self,serial_num,freq,addr,power,rssi,prev_baud_rate:int|None=None, uart_baudrate=9600,air_speed=2400, net_id=0,buffer_size = 240,crypt=0,relay=False,lbt=False,wor=False, timeout:float|None=None, info:bool=False, warning:bool=True, debug:bool=False):
+    def __init__(self,serial_num,freq,addr,power,rssi,prev_baud_rate:int|None=None, uart_baudrate=9600,air_speed=2400, net_id=0,buffer_size = 240,crypt=0,relay=False,point_to_point=True, lbt=False,wor=False, timeout:float|None=None, info:bool=False, warning:bool=True, debug:bool=False):
         """
         Params:
             serial_num (string): Serial port number (default "/dev/ttyAMA0" for RPi w. debian)
@@ -109,6 +108,7 @@ class sx126x:
         self.info = info
         self.warning = warning
         self.debug = debug
+        self.point_to_point = point_to_point
         # Initial the GPIO for M0 and M1 Pin
         GPIO.setmode(GPIO.BCM)
         GPIO.setwarnings(False)
@@ -119,12 +119,15 @@ class sx126x:
         # ! AUX PIN IS 1 WHEN E22-900T22S SEND BUFFER IS EMPTY
         GPIO.setup(self.AUX,GPIO.IN) 
         time.sleep(0.1) # Sleep so device has time to react
+
+        while GPIO.input(self.AUX) == 0:  
+            time.sleep(0.01)
         # The hardware UART of Pi3B+,Pi4B is /dev/ttyS0 (or you can map it to another one manually if you are a nerd)
         self.ser = serial.Serial(serial_num, self.SX126X_CONF_UART_BAUDRATE, timeout=self.timeout)
         self.ser.flushInput()
 
         self.device_model = self.get_device_model()
-        self.set(freq,addr,power,rssi,uart_baudrate=self.baudrate,air_speed=air_speed,net_id=net_id,buffer_size=buffer_size,crypt=crypt,relay=relay,point_to_point=True, lbt=lbt, wor=wor)
+        self.set(freq,addr,power,rssi,uart_baudrate=self.baudrate,air_speed=air_speed,net_id=net_id,buffer_size=buffer_size,crypt=crypt,relay=relay,point_to_point=self.point_to_point, lbt=lbt, wor=wor)
 
         self.ser.close()
         self.ser = serial.Serial(serial_num,uart_baudrate, timeout=self.timeout)
@@ -411,25 +414,26 @@ class sx126x:
         bytes: object when packet inbound.\n
         
         bytes, or tuple (bytes, rssi) when rssi is enabled
-
-        this receive function assumes that the first two bytes include the address of the sender, and the third the length of the message. #TODO: Change this to add net_id to header
+        
+        Function assumes first byte is length of message
         """
-        if self.ser.inWaiting() > 2: 
-            # wait for first 2 bytes 
+        if self.ser.inWaiting() > 1: 
+            # wait for length header, and first content byte 
             
-            r_buff = self.ser.read(1)
+            r_buff = self.ser.read()
             # 1st byte contains tot. number of bytes in packet
             packet_size = r_buff[0]
-            # ! THIS SECTION LOOPS INDEFINETLY IF PACKET SIZE HEADER IS CORRUPTED
             # TODO: ADD DETECTION OF BROKEN PACKETS, THEY SHOULD BE DROPPED (like udp) (firmware does this, but it doesn't guarantee buffer overflows after and before reception)
             # TODO: Test this with packets larger than single packet sizes
             # TODO: Make this work when using mode that doesn't include sender ip in header 
             if self.debug: print(f"DEBUG: r_buff: {r_buff}")
             if self.debug: print(f"DEBUG: Reading {packet_size} bytes")
+            
+            # ! THIS SECTION LOOPS INDEFINETLY IF PACKET SIZE HEADER IS CORRUPTED (and the input is not cleared without reconfig)
             while True: 
                 r_buff += self.ser.read() 
                 # if self.debug: print(f"DEBUG: r_buff: {r_buff}\r", end='')
-                if len(r_buff) == packet_size: 
+                if len(r_buff) >= packet_size: 
                     #self.ser.inWaiting()  # This line does nothing? 
                     break
             # if self.debug: print()

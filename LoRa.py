@@ -8,7 +8,7 @@ class LoRa:
     # SERIAL PORT IS RPi SPECIFIC
     #
     
-    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/AMA0", power=22, rssi=False, uart_baudrate=9600, air_speed=2400, net_id=0, packet_size:int=240, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
+    def __init__(self, FREQ = 868, CHANNEL = 65535, SERIAL_PORT="/dev/AMA0", power=22, rssi=False, uart_baudrate=9600, air_speed=2400, net_id=0, packet_size:int=240, point_to_point:bool=True, timeout:float|None=None, info:bool=False, debug:bool=False, warning:bool=True):
         self.freq = FREQ
         self.channel = CHANNEL
         self.serial_port = SERIAL_PORT
@@ -21,11 +21,12 @@ class LoRa:
         self.air_speed = air_speed
         self.net_id = net_id
         self.packet_size = packet_size
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=rssi, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, net_id=self.net_id, packet_size=packet_size, timeout=timeout, debug=debug, info=info) 
+        self.point_to_point = point_to_point
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, self.power, rssi=rssi, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, net_id=self.net_id, packet_size=packet_size, point_to_point=self.point_to_point, timeout=self.timeout, debug=self.debug, info=self.info) 
         self.SX126X_UART_BAUDRATE = self.lora_node.SX126X_UART_BAUDRATE
 
-    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,prev_uart_baudrate=None, uart_baudrate=9600, air_speed=2400, net_id=0, packet_size=240, relay=False,timeout:float|None=None, debug:bool=False, info:bool=True):
-        return sx126x.sx126x(serial_num,freq, addr, power, rssi, prev_uart_baudrate, uart_baudrate, air_speed, net_id, buffer_size=packet_size, relay=relay, timeout=timeout, debug=debug, info=info)
+    def setup_sx1262(self, serial_num, freq, addr,power=22,rssi=False,prev_uart_baudrate=None, uart_baudrate=9600, air_speed=2400, net_id=0, packet_size=240, relay=False,point_to_point=True, timeout:float|None=None, debug:bool=False, info:bool=True):
+        return sx126x.sx126x(serial_num,freq, addr, power, rssi, prev_uart_baudrate, uart_baudrate, air_speed, net_id, buffer_size=packet_size, relay=relay, point_to_point=point_to_point, timeout=timeout, debug=debug, info=info)
     
     def change_settings(self, FREQ = None, CHANNEL = None, SERIAL_PORT=None, power:int|None=None, uart_baudrate=None, air_speed:int|None=None, net_id:int|None=None, packet_size:int|None=None, timeout:float|None=None):
         # if new value, set value to new value 
@@ -43,8 +44,8 @@ class LoRa:
         if net_id: self.net_id = net_id
         if packet_size: self.packet_size = packet_size
         if timeout: self.timeout = timeout
-        
-        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, prev_uart_baudrate=old_baud_rate, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, net_id=self.net_id, packet_size=self.packet_size, timeout=self.timeout, debug=self.debug) 
+         
+        self.lora_node = self.setup_sx1262(self.serial_port, self.freq, self.channel, rssi=False, power=self.power, prev_uart_baudrate=old_baud_rate, uart_baudrate=self.uart_baudrate, air_speed=self.air_speed, net_id=self.net_id, packet_size=self.packet_size, point_to_point=self.point_to_point, timeout=self.timeout, debug=self.debug) 
 
     def checksum(self, data:bytes|bytearray):
         """
@@ -55,19 +56,24 @@ class LoRa:
         result = checksum_generator.digest()
         return result
 
-    def pack_packet(self, destination:int, sender:int, content:bytes|bytearray, freq=[18]):
+    def pack_packet(self, destination:int, sender:int, content:bytes|bytearray, freq=[18], inc_sender_addr=False):
         """
         creates bytes object that includes destination, sender, length of packet, and content in packet.
 
         Sender address should be considered part of the content
         """
         address_dest = destination.to_bytes(2)
-        packet_size = (4+len(content)).to_bytes() # 4 bytes included in header
-        address_sender = sender.to_bytes(2)
-        sender_net_id = bytes([self.freq - 850])
+        if inc_sender_addr:
+            address_sender = sender.to_bytes(2)
+            sender_net_id = bytes([self.freq - 850])
+            packet_size = (4+len(content)).to_bytes() # 4 bytes included in header
+        else:
+            address_sender = b''
+            sender_net_id = b''
+            packet_size = (1+len(content)).to_bytes() # 1 byte included in header (length)
         # bytes([18]) -> 850 + 18 = 868 mhz
         # TODO: Add conditional for supporting transparent and point to point, currently first three bytes are used for point to point 
-        # TODO: TEST THAT FREQ WORKS
+        # TODO: TEST THAT FREQ WORKS with other frequencies 
         packet = address_dest + bytes(freq) + packet_size + address_sender + sender_net_id + bytes(content)
         return packet
 
@@ -183,14 +189,18 @@ class LoRa:
                 self.lora_node.send(self.pack_packet(sender_address, self.channel, bytes(checksum)))
 
     # TODO: Add feature to select message size
-    def raw_send(self, address, data:bytes|bytearray, freq=[18]):
+    def raw_send(self, address, data:bytes|bytearray, freq=[18], inc_sender_addr=False):
 
         if address.bit_length() > 16:
             raise Exception("INVALID ADDRESS LENGTH")
-        if len(data) > 233 and self.warning:
+        
+        if len(data) > 233 and self.warning and inc_sender_addr:
             # this should be handled better
             print("WARNING: data does not fit in a single LoRa message") 
-        packet = self.pack_packet(address, self.channel, bytes(data))
+        elif len(data) > 236 and self.warning:
+            print("WARNING: data does not fit in a single LoRa message") 
+
+        packet = self.pack_packet(address, self.channel, bytes(data), freq=freq, inc_sender_addr=inc_sender_addr)
         if self.debug: 
             print("DEBUG: Packet: ", packet)
             print(f"DEBUG: length: {len(packet)}")
